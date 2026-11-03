@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `local_alocacao` varchar(255);

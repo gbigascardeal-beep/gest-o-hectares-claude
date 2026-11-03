@@ -1,0 +1,1 @@
+ALTER TABLE `purchase_orders` ADD `freight_value` decimal(12,2) DEFAULT '0.00';

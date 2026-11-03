@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `lote` varchar(100);

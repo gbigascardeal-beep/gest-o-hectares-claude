@@ -1,0 +1,1 @@
+ALTER TABLE `purchase_requests` MODIFY COLUMN `status` enum('mercado_livre','em_negociacao','aguardando_entrega','aguardando_aprovacao','finalizado','aguardando_detalhes') NOT NULL DEFAULT 'mercado_livre';

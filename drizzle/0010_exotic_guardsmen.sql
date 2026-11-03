@@ -1,0 +1,1 @@
+ALTER TABLE `products` ADD `classification` enum('estoque','uso_especifico') DEFAULT 'estoque' NOT NULL;
