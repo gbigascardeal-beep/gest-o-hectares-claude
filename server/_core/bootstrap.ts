@@ -2,12 +2,22 @@ import * as db from "../db";
 import { ENV } from "./env";
 import { hashPassword } from "./password";
 
+/** Avisa no log do Railway o que está faltando configurar. */
+export function checkConfig() {
+  if (!ENV.databaseUrl) console.warn("[Config] FALTA a variável DATABASE_URL (o sistema não consegue salvar nada).");
+  if (ENV.cookieSecret.length < 32) console.warn("[Config] FALTA a variável JWT_SECRET (precisa ter 32 caracteres ou mais); sem ela o login não funciona.");
+  if (!ENV.adminEmail || !ENV.adminPassword) console.warn("[Config] ADMIN_EMAIL/ADMIN_PASSWORD não definidos: o primeiro administrador não será criado.");
+}
+
 /** Cria o primeiro administrador a partir de ADMIN_EMAIL / ADMIN_PASSWORD (só se ainda não existir). */
 export async function ensureAdminUser() {
   if (!ENV.adminEmail || !ENV.adminPassword) return;
   try {
     const existing = await db.getUserByEmail(ENV.adminEmail);
-    if (existing) return; // nunca sobrescreve a senha de quem já existe
+    if (existing) {
+      console.log(`[Admin] ${ENV.adminEmail} já existe (a senha não é alterada por aqui).`);
+      return; // nunca sobrescreve a senha de quem já existe
+    }
     if (ENV.adminPassword.length < 8) {
       console.warn("[Admin] ADMIN_PASSWORD precisa ter pelo menos 8 caracteres.");
       return;
