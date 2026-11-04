@@ -134,6 +134,13 @@
       "when": 1789061926600,
       "tag": "0018_unknown_next_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1789148326600,
+      "tag": "0019_login_proprio",
+      "breakpoints": true
     }
   ]
 }
