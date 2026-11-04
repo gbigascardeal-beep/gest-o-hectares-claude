@@ -11,7 +11,7 @@ Roda sozinho, sem depender do Manus: login próprio por e-mail e senha.
 ## Primeira vez
 1. `pnpm install`
 2. Copie `.env.example` para `.env` e preencha `DATABASE_URL`, `JWT_SECRET` (`openssl rand -hex 32`) e os dados do primeiro administrador (`ADMIN_EMAIL`, `ADMIN_PASSWORD`).
-3. `pnpm db:push` (cria as tabelas no banco)
+3. (As tabelas são criadas sozinhas quando o sistema liga.)
 4. `pnpm dev` e abra http://localhost:3000
 5. Entre com o e-mail e a senha do `.env`. Em **Usuários** você cadastra o resto da equipe.
 
