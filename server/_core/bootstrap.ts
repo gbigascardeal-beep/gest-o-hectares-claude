@@ -6,7 +6,7 @@ import { hashPassword } from "./password";
 export function checkConfig() {
   if (!ENV.databaseUrl) console.warn("[Config] FALTA a variável DATABASE_URL (o sistema não consegue salvar nada).");
   if (ENV.cookieSecret.length < 32) console.warn("[Config] FALTA a variável JWT_SECRET (precisa ter 32 caracteres ou mais); sem ela o login não funciona.");
-  if (!ENV.googlePlacesApiKey) console.log("[Config] GOOGLE_PLACES_API_KEY não definida: a aba \"Encontrar fornecedores\" fica desativada.");
+  if (!ENV.googlePlacesApiKey) console.log("[Config] GOOGLE_PLACES_API_KEY não definida: a busca de fornecedores usa o mapa gratuito (OpenStreetMap, alcance até 100 km).");
   if (!ENV.adminEmail || !ENV.adminPassword) console.warn("[Config] ADMIN_EMAIL/ADMIN_PASSWORD não definidos: o primeiro administrador não será criado.");
 }
 

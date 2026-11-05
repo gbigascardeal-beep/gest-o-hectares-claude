@@ -8,7 +8,7 @@ import * as assetDb from "./assetDb";
 import * as toolLoansDb from "./toolLoansDb";
 import { TRPCError } from "@trpc/server";
 import { sdk } from "./_core/sdk";
-import { searchSuppliers } from "./_core/places";
+import { getSearchInfo, searchSuppliers } from "./_core/places";
 import { formatCnpj, onlyDigits } from "@shared/cnpj";
 import { hashPassword, verifyPassword } from "./_core/password";
 
@@ -433,6 +433,8 @@ export const appRouter = router({
 
   // ============ CATÁLOGO DE FORNECEDORES: busca externa ============
   supplierCatalog: router({
+    info: protectedProcedure.query(() => getSearchInfo()),
+
     search: protectedProcedure
       .input(
         z.object({
