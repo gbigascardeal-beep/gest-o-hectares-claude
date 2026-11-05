@@ -25,6 +25,7 @@ import NewExitRequest from "./pages/NewExitRequest";
 import ExitRequestDetails from "./pages/ExitRequestDetails";
 import Login from "./pages/Login";
 import Users from "./pages/Users";
+import SupplierCatalog from "./pages/SupplierCatalog";
 import Account from "./pages/Account";
 import AssetDashboard from "./pages/AssetDashboard";
 import AssetList from "./pages/AssetList";
@@ -85,6 +86,7 @@ function ProtectedRouter() {
         <Route path={"/patrimonio/locais"} component={AssetLocations} />
         <Route path={"/patrimonio/ferramentas"} component={AssetToolLoans} />
         <Route path={"/settings"} component={Settings} />
+        <Route path={"/fornecedores"} component={SupplierCatalog} />
         <Route path={"/users"} component={Users} />
         <Route path={"/minha-conta"} component={Account} />
         <Route path={"/404"} component={NotFound} />

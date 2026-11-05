@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Package, Layers, ShoppingCart, FileText, Settings, Clipboard, ArrowUpFromLine, Building2, ChevronDown, ChevronRight, Menu, Wrench, KeyRound } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Package, Layers, ShoppingCart, FileText, Settings, Clipboard, ArrowUpFromLine, Building2, ChevronDown, ChevronRight, Menu, Wrench, KeyRound, Store } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -51,6 +51,7 @@ const menuItems: MenuItem[] = [
   { icon: ShoppingCart, label: "Ordens de Compra", path: "/purchase-orders", requiredRole: "user" },
   { icon: Clipboard, label: "Solicitações de Compra", path: "/purchase-requests", requiredRole: "user" },
   { icon: ArrowUpFromLine, label: "Requisições de Saída", path: "/exit-requests", requiredRole: "user" },
+  { icon: Store, label: "Catálogo de Fornecedores", path: "/fornecedores", requiredRole: "user" },
   { icon: FileText, label: "Relatórios", path: "/reports", requiredRole: "user" },
   {
     icon: Building2,
