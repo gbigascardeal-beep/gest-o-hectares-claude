@@ -65,6 +65,15 @@ function FindSuppliers() {
   const [scope, setScope] = useState("25");
   const [sort, setSort] = useState<SortKey>("relevancia");
 
+  const { data: info } = trpc.supplierCatalog.info.useQuery();
+  const isOsm = info?.provider === "osm";
+  const radiusOptions = RADIUS_OPTIONS.filter((o) => {
+    if (o.value === "brasil") return !!info?.allowNationwide;
+    return Number(o.value) <= (info?.maxRadiusKm ?? 500);
+  });
+  const effectiveScope = radiusOptions.some((o) => o.value === scope) ? scope : "25";
+  const mapsSearchUrl = `https://www.google.com/maps/search/${encodeURIComponent(`${keyword.trim()} ${city.trim() ? `perto de ${city.trim()}` : ""}`.trim())}`;
+
   const search = trpc.supplierCatalog.search.useMutation({
     onError: (error) => toast.error(error.message),
   });
@@ -72,12 +81,12 @@ function FindSuppliers() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (keyword.trim().length < 2) return toast.error("Digite o que você procura (ex.: materiais de construção)");
-    if (scope !== "brasil" && !city.trim()) return toast.error("Informe a cidade de referência");
+    if (effectiveScope !== "brasil" && !city.trim()) return toast.error("Informe a cidade de referência");
     saveCity(city);
     search.mutate({
       keyword,
       city: city.trim() || undefined,
-      radiusKm: scope === "brasil" ? null : Number(scope),
+      radiusKm: effectiveScope === "brasil" ? null : Number(effectiveScope),
     });
   };
 
@@ -109,10 +118,10 @@ function FindSuppliers() {
             </div>
             <div className="space-y-2">
               <Label>Alcance da busca</Label>
-              <Select value={scope} onValueChange={setScope}>
+              <Select value={effectiveScope} onValueChange={setScope}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {RADIUS_OPTIONS.map((o) => (
+                  {radiusOptions.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -125,7 +134,7 @@ function FindSuppliers() {
                 <SelectContent>
                   <SelectItem value="relevancia">Relevância</SelectItem>
                   <SelectItem value="distancia">Distância</SelectItem>
-                  <SelectItem value="avaliacao">Avaliação</SelectItem>
+                  {!isOsm && <SelectItem value="avaliacao">Avaliação</SelectItem>}
                 </SelectContent>
               </Select>
             </div>
@@ -134,6 +143,19 @@ function FindSuppliers() {
               Buscar
             </Button>
           </form>
+
+          {isOsm && (
+            <p className="text-xs text-muted-foreground mt-4">
+              Busca gratuita pelo mapa aberto (OpenStreetMap), com alcance de até {info?.maxRadiusKm} km. Algumas empresas podem não
+              aparecer e telefone ou site nem sempre estão preenchidos.
+              {keyword.trim().length >= 2 && (
+                <>
+                  {" "}
+                  <a className="underline" href={mapsSearchUrl} target="_blank" rel="noopener noreferrer">Abrir esta busca no Google Maps</a>
+                </>
+              )}
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -163,7 +185,10 @@ function FindSuppliers() {
       {search.isSuccess && results.length === 0 && (
         <div className="rounded-xl border border-dashed p-12 text-center">
           <p className="font-semibold">Nenhuma empresa encontrada</p>
-          <p className="text-sm text-muted-foreground mt-1">Tente outra palavra-chave, aumente o alcance ou escolha "Todo o Brasil".</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Tente outra palavra-chave ou aumente o alcance.{" "}
+            <a className="underline" href={mapsSearchUrl} target="_blank" rel="noopener noreferrer">Procurar no Google Maps</a>
+          </p>
         </div>
       )}
 
@@ -206,7 +231,7 @@ function FindSuppliers() {
                   {isHttpUrl(place.mapsUrl) && (
                     <Button asChild variant="outline" size="sm">
                       <a href={place.mapsUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="w-4 h-4 mr-2" /> Ver no Google Maps
+                        <ExternalLink className="w-4 h-4 mr-2" /> Ver no mapa
                       </a>
                     </Button>
                   )}
@@ -217,6 +242,7 @@ function FindSuppliers() {
           <p className="text-xs text-muted-foreground">
             Resultados externos são só para consulta. Para guardar um fornecedor, use "Cadastrar fornecedor próprio" com o CNPJ e os dados
             confirmados diretamente com a empresa.
+            {search.data.source === "osm" && " Dados © contribuidores do OpenStreetMap."}
           </p>
         </div>
       )}
