@@ -8,6 +8,8 @@ import * as assetDb from "./assetDb";
 import * as toolLoansDb from "./toolLoansDb";
 import { TRPCError } from "@trpc/server";
 import { sdk } from "./_core/sdk";
+import { searchSuppliers } from "./_core/places";
+import { formatCnpj, onlyDigits } from "@shared/cnpj";
 import { hashPassword, verifyPassword } from "./_core/password";
 
 // ============ ADMIN PROCEDURE ============
@@ -42,6 +44,61 @@ function registerFailure(key: string) {
   const entry = failedLogins.get(key);
   if (!entry) failedLogins.set(key, { count: 1, first: Date.now() });
   else entry.count += 1;
+}
+
+// ============ FORNECEDORES: validação e limpeza ============
+const supplierFieldsShape = {
+  tradeName: z.string().max(255).optional(),
+  category: z.string().max(100).optional(),
+  contactName: z.string().max(255).optional(),
+  email: z.string().trim().email("E-mail inválido").max(320).or(z.literal("")).optional(),
+  phone: z.string().max(20).optional(),
+  website: z.string().max(500).optional(),
+  address: z.string().max(500).optional(),
+  cep: z.string().max(10).optional(),
+  city: z.string().max(255).optional(),
+  state: z.string().max(2).optional(),
+};
+
+const supplierCreateInput = z.object({
+  cnpj: z.string().min(14),
+  companyName: z.string().trim().min(1, "Informe o nome da empresa").max(255),
+  ...supplierFieldsShape,
+});
+
+/** "" vira null (limpa o campo); undefined fica de fora (não mexe). */
+function cleanText(value: string | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  const text = value.trim();
+  return text === "" ? null : text;
+}
+
+function cleanWebsite(value: string | undefined): string | null | undefined {
+  const text = cleanText(value);
+  if (!text) return text;
+  try {
+    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("protocolo");
+    return url.toString().slice(0, 500);
+  } catch {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "O endereço do site parece inválido" });
+  }
+}
+
+function cleanSupplierFields(input: Partial<Record<keyof typeof supplierFieldsShape, string | undefined>>) {
+  const state = cleanText(input.state);
+  return {
+    tradeName: cleanText(input.tradeName),
+    category: cleanText(input.category),
+    contactName: cleanText(input.contactName),
+    email: cleanText(input.email),
+    phone: cleanText(input.phone),
+    website: cleanWebsite(input.website),
+    address: cleanText(input.address),
+    cep: cleanText(input.cep),
+    city: cleanText(input.city),
+    state: typeof state === "string" ? state.toUpperCase() : state,
+  };
 }
 
 // ============ ROUTERS ============
@@ -322,23 +379,48 @@ export const appRouter = router({
       return await db.getSuppliers();
     }),
 
-    create: protectedProcedure
-      .input(
-        z.object({
-          cnpj: z.string().min(14),
-          companyName: z.string().min(1),
-          contactName: z.string().optional(),
-          email: z.string().email().optional(),
-          phone: z.string().optional(),
-          address: z.string().optional(),
-          cep: z.string().optional(),
-          city: z.string().optional(),
-          state: z.string().optional(),
-        })
-      )
+    create: protectedProcedure.input(supplierCreateInput).mutation(async ({ input }) => {
+      const digits = onlyDigits(input.cnpj);
+      if (digits.length !== 14) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "O CNPJ precisa ter 14 números" });
+      }
+      const cnpj = formatCnpj(digits);
+      const fields = cleanSupplierFields(input);
+
+      const existing = (await db.getSupplierByCnpj(cnpj)) ?? (await db.getSupplierByCnpj(digits));
+      if (existing && existing.isActive) {
+        throw new TRPCError({ code: "CONFLICT", message: "Já existe um fornecedor cadastrado com esse CNPJ" });
+      }
+      if (existing) {
+        // estava removido do catálogo: reativa com os dados novos
+        await db.updateSupplier(existing.id, { ...fields, companyName: input.companyName.trim(), isActive: true });
+        return [await db.getSupplierById(existing.id)];
+      }
+      return await db.createSupplier({ ...fields, cnpj, companyName: input.companyName.trim() });
+    }),
+
+    update: protectedProcedure
+      .input(z.object({ id: z.number(), companyName: z.string().trim().min(1).max(255).optional(), ...supplierFieldsShape }))
       .mutation(async ({ input }) => {
-        return await db.createSupplier(input);
+        const { id, companyName, ...rest } = input;
+        const target = await db.getSupplierById(id);
+        if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Fornecedor não encontrado" });
+        await db.updateSupplier(id, { ...cleanSupplierFields(rest), ...(companyName ? { companyName } : {}) });
+        return { success: true } as const;
       }),
+
+    setFavorite: protectedProcedure
+      .input(z.object({ id: z.number(), isFavorite: z.boolean() }))
+      .mutation(async ({ input }) => {
+        await db.updateSupplier(input.id, { isFavorite: input.isFavorite });
+        return { success: true } as const;
+      }),
+
+    // "Remover" tira do catálogo, mas preserva o histórico das ordens de compra
+    remove: managerProcedure.input(z.number()).mutation(async ({ input }) => {
+      await db.updateSupplier(input, { isActive: false, isFavorite: false });
+      return { success: true } as const;
+    }),
 
     getById: protectedProcedure.input(z.number()).query(async ({ input }) => {
       return await db.getSupplierById(input);
@@ -349,7 +431,18 @@ export const appRouter = router({
     }),
   }),
 
-
+  // ============ CATÁLOGO DE FORNECEDORES: busca externa ============
+  supplierCatalog: router({
+    search: protectedProcedure
+      .input(
+        z.object({
+          keyword: z.string().trim().min(2, "Digite pelo menos 2 letras").max(100),
+          city: z.string().trim().max(100).optional(),
+          radiusKm: z.number().int().min(1).max(500).nullable().optional(), // null = todo o Brasil
+        })
+      )
+      .mutation(async ({ input, ctx }) => searchSuppliers(input, ctx.user.id)),
+  }),
 
   // ============ PURCHASE ORDERS ============
   purchaseOrders: router({

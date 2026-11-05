@@ -475,24 +475,39 @@ export async function deleteStockMovementSafe(id: number) {
 
 // ============ SUPPLIER OPERATIONS ============
 
-export async function createSupplier(data: {
+export type SupplierInput = {
   cnpj: string;
   companyName: string;
-  contactName?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  cep?: string;
-  city?: string;
-  state?: string;
-}) {
+  tradeName?: string | null;
+  category?: string | null;
+  contactName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: string | null;
+  cep?: string | null;
+  city?: string | null;
+  state?: string | null;
+};
+
+export async function createSupplier(data: SupplierInput) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   await db.insert(suppliers).values(data);
-  
+
   // Retornar o fornecedor criado
   return await db.select().from(suppliers).where(eq(suppliers.cnpj, data.cnpj)).limit(1);
+}
+
+export async function updateSupplier(
+  id: number,
+  data: Partial<Omit<SupplierInput, "cnpj">> & { isFavorite?: boolean; isActive?: boolean }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  if (Object.keys(data).length === 0) return;
+  await db.update(suppliers).set(data).where(eq(suppliers.id, id));
 }
 
 export async function getSuppliers() {

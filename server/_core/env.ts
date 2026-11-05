@@ -7,6 +7,8 @@ export const ENV = {
   adminEmail: (process.env.ADMIN_EMAIL ?? "").trim().toLowerCase(),
   adminPassword: process.env.ADMIN_PASSWORD ?? "",
   adminName: process.env.ADMIN_NAME ?? "Administrador",
+  // Busca de fornecedores por localização (Google Places API). Sem a chave, só a aba "Meu catálogo" funciona.
+  googlePlacesApiKey: process.env.GOOGLE_PLACES_API_KEY ?? "",
   // Opcionais (recursos que eram do Manus; sem eles o sistema funciona normalmente)
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
