@@ -141,6 +141,13 @@
       "when": 1789148326600,
       "tag": "0019_login_proprio",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1789234726600,
+      "tag": "0020_catalogo_fornecedores",
+      "breakpoints": true
     }
   ]
 }
