@@ -23,8 +23,8 @@ Depois do primeiro acesso, cadastre pelo menos um centro de custo em **Configura
 
 ## Catálogo de fornecedores
 - **Meu catálogo** (fornecedores cadastrados, favoritos, categorias) funciona sem configuração extra.
-- **Encontrar fornecedores** (busca por palavra-chave, cidade e alcance em km) usa a API do Google. Para ativar, crie uma chave da "Places API (New)" no Google Cloud e coloque em `GOOGLE_PLACES_API_KEY`. Sem a chave, a aba mostra um aviso e o resto do sistema funciona normalmente.
-- Cada busca é cobrada pelo Google acima da cota gratuita mensal: defina um limite de gastos e restrinja a chave à Places API (New).
+- **Encontrar fornecedores** funciona sem cadastro nenhum: usa o mapa gratuito do OpenStreetMap (alcance de até 100 km). A cobertura de empresas é menor que a do Google e telefone/site nem sempre aparecem.
+- Opcional: para uma busca mais completa e com "Todo o Brasil", crie uma chave da "Places API (New)" no Google Cloud e coloque em `GOOGLE_PLACES_API_KEY`. O Google cobra acima da cota gratuita mensal.
 
 ## Esqueceu a senha do administrador?
 `pnpm set-password email@empresa.com NovaSenha123`
