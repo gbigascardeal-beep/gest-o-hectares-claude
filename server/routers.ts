@@ -506,7 +506,7 @@ export const appRouter = router({
     create: manageOrdersProcedure
       .input(
         z.object({
-          orderNumber: z.string().min(1),
+          // o número da ordem (OC-AAAA-NNN) é gerado automaticamente pelo servidor
           supplierId: z.number(),
           costCenterId: z.number(),
           paymentMethod: z.enum(["a_vista", "parcelado"]),
@@ -541,7 +541,6 @@ export const appRouter = router({
 
         // Create purchase order
         const result = await db.createPurchaseOrder({
-          orderNumber: input.orderNumber,
           supplierId: input.supplierId,
           costCenterId: input.costCenterId,
           requestedBy: ctx.user.id,
@@ -582,7 +581,7 @@ export const appRouter = router({
           }
         }
 
-        return { success: true, orderId };
+        return { success: true, orderId, orderNumber: (result as any).orderNumber as string };
       }),
 
     getById: protectedProcedure.input(z.number()).query(async ({ input }) => {
@@ -616,7 +615,6 @@ export const appRouter = router({
       .input(
         z.object({
           id: z.number(),
-          orderNumber: z.string().optional(),
           supplierId: z.number().optional(),
           costCenterId: z.number().optional(),
           paymentMethod: z.enum(["a_vista", "parcelado"]).optional(),

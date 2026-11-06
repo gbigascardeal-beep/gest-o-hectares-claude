@@ -123,7 +123,7 @@ export default function EditPurchaseOrder() {
   };
 
   const handleSave = async () => {
-    if (!formData.orderNumber || !formData.supplierId || !formData.costCenterId) {
+    if (!formData.supplierId || !formData.costCenterId) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -132,7 +132,6 @@ export default function EditPurchaseOrder() {
     try {
       await updateMutation.mutateAsync({
         id: orderId,
-        orderNumber: formData.orderNumber,
         supplierId: parseInt(formData.supplierId),
         costCenterId: parseInt(formData.costCenterId),
         totalValue: formData.totalValue,
@@ -257,12 +256,12 @@ export default function EditPurchaseOrder() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="orderNumber">Código da Ordem *</Label>
+                    <Label htmlFor="orderNumber">Código da Ordem</Label>
                     <Input
                       id="orderNumber"
                       value={formData.orderNumber}
-                      onChange={(e) => handleInputChange('orderNumber', e.target.value)}
-                      placeholder="OC-2026-001"
+                      readOnly
+                      disabled
                       className="mt-1"
                     />
                   </div>

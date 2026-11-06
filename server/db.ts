@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { formatOrderNumber } from "@shared/orderTotals";
 import { eq, and, gte, lte, like, desc, asc, gt, sql, or, count, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
@@ -545,8 +546,22 @@ export async function getSupplierByCnpj(cnpj: string) {
 
 // ============ PURCHASE ORDER OPERATIONS ============
 
+/** Próximo número da sequência do ano (OC-2026-001, 002...). Ignora números digitados à mão que fujam do padrão. */
+async function nextOrderNumber(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<string> {
+  const year = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric" }).format(new Date()));
+  const prefix = `OC-${year}-`;
+  const [row] = await db
+    .select({ last: sql<number | null>`MAX(CAST(SUBSTRING(${purchaseOrders.orderNumber}, ${prefix.length + 1}) AS UNSIGNED))` })
+    .from(purchaseOrders)
+    .where(sql`${purchaseOrders.orderNumber} REGEXP ${`^OC-${year}-[0-9]+$`}`);
+  return formatOrderNumber(year, Number(row?.last ?? 0) + 1);
+}
+
+function isDuplicateKey(error: any): boolean {
+  return [error, error?.cause].some((e) => e?.code === "ER_DUP_ENTRY" || e?.errno === 1062);
+}
+
 export async function createPurchaseOrder(data: {
-  orderNumber: string;
   supplierId: number;
   costCenterId: number;
   requestedBy: number;
@@ -579,24 +594,30 @@ export async function createPurchaseOrder(data: {
     }
   }
 
-  const result = await db.insert(purchaseOrders).values({
-    orderNumber: data.orderNumber,
-    supplierId: data.supplierId,
-    costCenterId: data.costCenterId,
-    requestedBy: data.requestedBy,
-    paymentMethod: data.paymentMethod,
-    installments: data.installments,
-    totalValue: totalValueNum.toString(),
-    freightValue: freightValueNum !== undefined ? freightValueNum.toString() : '0.00',
-    observations: data.observations,
-  });
-  
-  // Get the inserted order to return with ID
-  const insertedOrder = await db.select().from(purchaseOrders)
-    .where(eq(purchaseOrders.orderNumber, data.orderNumber))
-    .limit(1);
-  
-  return insertedOrder[0] || result;
+  // O número é gerado aqui. Se duas ordens saírem ao mesmo tempo e pegarem o mesmo número,
+  // o banco recusa a repetida (campo único) e tentamos de novo com o próximo.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const orderNumber = await nextOrderNumber(db);
+    try {
+      await db.insert(purchaseOrders).values({
+        orderNumber,
+        supplierId: data.supplierId,
+        costCenterId: data.costCenterId,
+        requestedBy: data.requestedBy,
+        paymentMethod: data.paymentMethod,
+        installments: data.installments,
+        totalValue: totalValueNum.toString(),
+        freightValue: freightValueNum !== undefined ? freightValueNum.toString() : '0.00',
+        observations: data.observations,
+      });
+    } catch (error) {
+      if (isDuplicateKey(error)) continue;
+      throw error;
+    }
+    const inserted = await db.select().from(purchaseOrders).where(eq(purchaseOrders.orderNumber, orderNumber)).limit(1);
+    return inserted[0];
+  }
+  throw new Error("Não foi possível gerar o número da ordem. Tente de novo.");
 }
 
 export async function getPurchaseOrders(filters?: {
@@ -888,7 +909,6 @@ export async function deletePurchaseOrder(id: number) {
 export async function updatePurchaseOrder(
   id: number,
   data: {
-    orderNumber?: string;
     supplierId?: number;
     costCenterId?: number;
     paymentMethod?: "a_vista" | "parcelado";
