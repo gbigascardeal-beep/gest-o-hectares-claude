@@ -1,3 +1,5 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { can } from "@shared/roles";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +35,9 @@ import { ArrowDown, ArrowUp, Edit2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Stock() {
+  const { user } = useAuth();
+  const canMove = can(user?.role, "handleStock");
+  const isAdmin = user?.role === "admin";
   const [isOpen, setIsOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -192,15 +197,17 @@ export default function Stock() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Controle de Estoque</h1>
-          <p className="text-muted-foreground mt-2">Registre entradas e saídas de produtos</p>
+          <p className="text-muted-foreground mt-2">Entradas de produtos e histórico de movimentações. A saída é feita pela Requisição de Saída.</p>
         </div>
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <ArrowUp className="w-4 h-4 mr-2" />
-              Nova Movimentação
-            </Button>
-          </DialogTrigger>
+          {canMove && (
+            <DialogTrigger asChild>
+              <Button>
+                <ArrowUp className="w-4 h-4 mr-2" />
+                Nova Movimentação
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Registrar Movimentação</DialogTitle>
@@ -217,7 +224,7 @@ export default function Stock() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="entrada">Entrada</SelectItem>
-                    <SelectItem value="saida">Saída</SelectItem>
+                    {isAdmin && <SelectItem value="saida">Saída</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>
@@ -359,7 +366,8 @@ export default function Stock() {
                         {movement.notes || "-"}
                       </td>
                       <td className="text-center py-3 px-2">
-                        <div className="flex gap-2 justify-center">
+                        {canMove && (
+<div className="flex gap-2 justify-center">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -377,6 +385,7 @@ export default function Stock() {
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </Button>
                         </div>
+)}
                       </td>
                     </tr>
                   ))}

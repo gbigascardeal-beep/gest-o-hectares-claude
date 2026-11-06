@@ -22,7 +22,7 @@ export const users = mysqlTable("users", {
   loginMethod: varchar("loginMethod", { length: 64 }),
   passwordHash: varchar("passwordHash", { length: 255 }),
   isActive: boolean("isActive").default(true).notNull(),
-  role: mysqlEnum("role", ["user", "admin", "supervisor"]).default("user").notNull(),
+  role: mysqlEnum("role", ["user", "admin", "supervisor", "comprador", "almoxarifado"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -122,8 +122,8 @@ export const purchaseOrders = mysqlTable("purchase_orders", {
   supplierId: int("supplier_id").notNull(),
   costCenterId: int("cost_center_id").notNull(),
   requestedBy: int("requested_by").notNull(),
-  status: mysqlEnum("status", ["pendente", "aprovada", "finalizada", "cancelada"])
-    .default("pendente")
+  status: mysqlEnum("status", ["solicitado", "entregue", "cancelada"])
+    .default("solicitado")
     .notNull(),
   paymentMethod: mysqlEnum("payment_method", ["a_vista", "parcelado"]).notNull(),
   installments: int("installments").default(1),
@@ -132,6 +132,7 @@ export const purchaseOrders = mysqlTable("purchase_orders", {
   observations: longtext("observations"),
   approvedBy: int("approved_by"),
   approvedAt: timestamp("approved_at"),
+  stockAppliedAt: timestamp("stock_applied_at"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -150,6 +151,8 @@ export const purchaseOrderItems = mysqlTable("purchase_order_items", {
   quantity: int("quantity").notNull(),
   unitValue: decimal("unit_value", { precision: 12, scale: 2 }).notNull(),
   totalValue: decimal("total_value", { precision: 12, scale: 2 }).notNull(),
+  isSpecificUse: boolean("is_specific_use").default(false).notNull(),
+  stockMovementId: int("stock_movement_id"),
 });
 
 export type PurchaseOrderItem = typeof purchaseOrderItems.$inferSelect;

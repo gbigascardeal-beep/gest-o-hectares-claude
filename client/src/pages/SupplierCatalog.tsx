@@ -1,3 +1,4 @@
+import { can } from "@shared/roles";
 import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -271,7 +272,7 @@ function MyCatalog({ onEdit }: { onEdit: (supplier: Supplier) => void }) {
     },
     onError: (e) => toast.error(e.message),
   });
-  const canRemove = user?.role === "admin" || user?.role === "supervisor";
+  const canManage = can(user?.role, "manageOrders");
 
   const filtered = useMemo(() => {
     const q = text.trim().toLowerCase();
@@ -377,10 +378,12 @@ function MyCatalog({ onEdit }: { onEdit: (supplier: Supplier) => void }) {
               </div>
 
               <div className="flex gap-2 pt-1">
-                <Button variant="outline" size="sm" onClick={() => onEdit(s)}>
+                {canManage && (
+<Button variant="outline" size="sm" onClick={() => onEdit(s)}>
                   <Pencil className="w-4 h-4 mr-2" /> Editar
                 </Button>
-                {canRemove && (
+)}
+                {canManage && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -523,6 +526,8 @@ function SupplierFormDialog({ supplier, onClose }: { supplier: Supplier | null; 
 /* Página                                                              */
 /* ------------------------------------------------------------------ */
 export default function SupplierCatalog() {
+  const { user: currentUser } = useAuth();
+  const canRegister = can(currentUser?.role, "manageOrders");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
 
@@ -543,7 +548,9 @@ export default function SupplierCatalog() {
           </p>
         </div>
         <div className="max-w-xs space-y-1">
-          <Button onClick={() => openForm(null)}><Plus className="w-4 h-4 mr-2" /> Cadastrar fornecedor próprio</Button>
+          {canRegister && (
+<Button onClick={() => openForm(null)}><Plus className="w-4 h-4 mr-2" /> Cadastrar fornecedor próprio</Button>
+)}
           <p className="text-xs text-muted-foreground">
             Cadastre com CNPJ e informações obtidas diretamente da empresa; resultados externos não são copiados.
           </p>

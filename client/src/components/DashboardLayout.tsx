@@ -71,9 +71,9 @@ const menuItems: MenuItem[] = [
   { icon: KeyRound, label: "Minha conta", path: "/minha-conta" },
 ];
 
-const ROLE_RANK = { user: 1, supervisor: 2, admin: 3 } as const;
+// "admin" vê tudo; os demais perfis veem tudo, menos as telas exclusivas do administrador
 const hasRole = (userRole: string | undefined, required?: MenuItem["requiredRole"]) =>
-  !required || (ROLE_RANK[userRole as keyof typeof ROLE_RANK] ?? 0) >= ROLE_RANK[required];
+  !required || required === "user" ? !!userRole : userRole === "admin";
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 280;

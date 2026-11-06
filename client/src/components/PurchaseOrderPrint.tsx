@@ -50,12 +50,10 @@ export function generatePurchaseOrderPrint(order: PurchaseOrderPrintProps['order
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'pendente':
+      case 'solicitado':
         return 'Solicitado';
-      case 'aprovada':
-        return 'Aprovado';
-      case 'finalizada':
-        return 'Finalizado';
+      case 'entregue':
+        return 'Entregue';
       case 'cancelada':
         return 'Cancelado';
       default:

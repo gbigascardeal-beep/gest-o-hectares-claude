@@ -1,3 +1,5 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { can } from "@shared/roles";
 'use client';
 
 import { useState, useMemo } from 'react';
@@ -32,6 +34,8 @@ import { toast } from 'sonner';
 import { generatePurchaseOrderPrint } from '@/components/PurchaseOrderPrint';
 
 export default function PurchaseOrders() {
+  const { user } = useAuth();
+  const canManage = can(user?.role, "manageOrders");
   const [, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -93,11 +97,9 @@ export default function PurchaseOrders() {
   // Get status badge color
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pendente':
+      case 'solicitado':
         return 'bg-yellow-100 text-yellow-800';
-      case 'aprovada':
-        return 'bg-blue-100 text-blue-800';
-      case 'finalizada':
+      case 'entregue':
         return 'bg-green-100 text-green-800';
       case 'cancelada':
         return 'bg-red-100 text-red-800';
@@ -109,12 +111,10 @@ export default function PurchaseOrders() {
   // Get status label
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'pendente':
+      case 'solicitado':
         return 'Solicitado';
-      case 'aprovada':
-        return 'Aprovado';
-      case 'finalizada':
-        return 'Finalizado';
+      case 'entregue':
+        return 'Entregue';
       case 'cancelada':
         return 'Cancelado';
       default:
@@ -164,13 +164,15 @@ export default function PurchaseOrders() {
           <h1 className="text-3xl font-bold text-gray-900">Ordens de Compra</h1>
           <p className="text-sm text-gray-600 mt-1">Gestão de todas as ordens de compra do sistema</p>
         </div>
-        <Button
+        {canManage && (
+<Button
           onClick={() => setLocation('/purchase-orders/new')}
           className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
         >
           <Plus className="w-4 h-4" />
           Nova Ordem
         </Button>
+)}
       </div>
 
       {/* Filters */}
@@ -195,9 +197,8 @@ export default function PurchaseOrders() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as situações</SelectItem>
-              <SelectItem value="pendente">Solicitado</SelectItem>
-              <SelectItem value="aprovada">Aprovado</SelectItem>
-              <SelectItem value="finalizada">Finalizado</SelectItem>
+              <SelectItem value="solicitado">Solicitado</SelectItem>
+              <SelectItem value="entregue">Entregue</SelectItem>
               <SelectItem value="cancelada">Cancelado</SelectItem>
             </SelectContent>
           </Select>
@@ -213,7 +214,8 @@ export default function PurchaseOrders() {
         ) : filteredOrders.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <p className="text-gray-600">Nenhuma ordem de compra encontrada</p>
-            <Button
+            {canManage && (
+<Button
               onClick={() => setLocation('/purchase-orders/new')}
               variant="outline"
               className="gap-2"
@@ -221,6 +223,7 @@ export default function PurchaseOrders() {
               <Plus className="w-4 h-4" />
               Criar primeira ordem
             </Button>
+)}
           </div>
         ) : (
           <Table>

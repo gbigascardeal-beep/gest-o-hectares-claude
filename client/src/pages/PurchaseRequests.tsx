@@ -1,3 +1,5 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { can } from "@shared/roles";
 import { useState, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -81,6 +83,8 @@ const statusColors: Record<StatusType, string> = {
 };
 
 export default function PurchaseRequests() {
+  const { user } = useAuth();
+  const canCreate = can(user?.role, "createRequests");
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
@@ -148,13 +152,15 @@ export default function PurchaseRequests() {
             Gerencie todas as suas solicitações de compra
           </p>
         </div>
-        <Button
+        {canCreate && (
+<Button
           onClick={() => navigate("/purchase-requests/new")}
           className="gap-2 bg-green-600 hover:bg-green-700"
         >
           <Plus className="h-4 w-4" />
           Nova Solicitação
         </Button>
+)}
       </div>
 
       {/* Stats Cards */}

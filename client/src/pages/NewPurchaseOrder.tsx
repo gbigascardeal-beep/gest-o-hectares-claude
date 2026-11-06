@@ -19,6 +19,7 @@ interface OrderItem {
   unit: string;
   unitValue: string;
   discount: string;
+  isSpecificUse: boolean;
 }
 
 interface FormData {
@@ -129,6 +130,7 @@ export default function NewPurchaseOrder() {
     unit: "UND",
     unitValue: "",
     discount: "0",
+    isSpecificUse: false,
   });
 
   const [transportData, setTransportData] = useState<TransportData>({
@@ -202,7 +204,7 @@ export default function NewPurchaseOrder() {
       return;
     }
     setOrderItems([...orderItems, currentItem]);
-    setCurrentItem({ productId: "", productName: "", quantity: "", unit: "UND", unitValue: "", discount: "0" });
+    setCurrentItem({ productId: "", productName: "", quantity: "", unit: "UND", unitValue: "", discount: "0", isSpecificUse: false });
     toast.success("Produto adicionado");
   };
 
@@ -276,6 +278,7 @@ export default function NewPurchaseOrder() {
             quantity: Math.floor(quantity),
             unitValue: unitValue.toString(),
             totalValue: totalValue.toString(),
+            isSpecificUse: item.isSpecificUse,
           };
         }),
       });
@@ -614,6 +617,19 @@ export default function NewPurchaseOrder() {
                   )}
                 </div>
 
+                <label className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4"
+                    checked={currentItem.isSpecificUse}
+                    onChange={(e) => setCurrentItem({ ...currentItem, isSpecificUse: e.target.checked })}
+                  />
+                  <span className="text-sm text-gray-800">
+                    <span className="font-semibold">Produto de uso específico</span>
+                    <span className="block text-xs text-gray-600">Marque se este item não deve entrar no estoque quando a ordem for entregue.</span>
+                  </span>
+                </label>
+
                 <div className="grid grid-cols-4 gap-4">
                   <div className="space-y-2">
                     <Label className="text-sm font-semibold text-gray-700">Quantidade *</Label>
@@ -680,7 +696,10 @@ export default function NewPurchaseOrder() {
                     {orderItems.map((item, index) => (
                       <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <div className="flex-1">
-                          <p className="font-medium text-gray-900">{item.productName || `Produto #${item.productId}`}</p>
+                          <p className="font-medium text-gray-900">
+                            {item.productName || `Produto #${item.productId}`}
+                            {item.isSpecificUse && <span className="ml-2 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">Uso específico</span>}
+                          </p>
                           <p className="text-sm text-gray-600">
                             {item.quantity} {item.unit} × R$ {parseFloat(item.unitValue).toFixed(2)} = R$ {(parseFloat(item.quantity || "0") * parseFloat(item.unitValue || "0") - parseFloat(item.discount || "0")).toFixed(2)}
                           </p>

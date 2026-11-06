@@ -709,22 +709,126 @@ export async function getPurchaseOrderById(id: number) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-export async function updatePurchaseOrderStatus(
-  id: number,
-  status: "pendente" | "aprovada" | "finalizada" | "cancelada",
-  approvedBy?: number
-) {
+export type PurchaseOrderStatus = "solicitado" | "entregue" | "cancelada";
+
+const normalizeName = (text: string) => text.trim().replace(/\s+/g, " ");
+
+/**
+ * Troca o status da ordem de compra.
+ * - Para "entregue": dá entrada de cada item no estoque (cria o produto se ainda não existir).
+ *   Itens marcados como "uso específico" não entram no saldo.
+ * - Saindo de "entregue": desfaz as entradas feitas por esta ordem.
+ * Tudo numa transação: ou acontece por completo, ou nada muda.
+ */
+export async function changePurchaseOrderStatus(id: number, newStatus: PurchaseOrderStatus, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const updateData: any = { status };
+  return await db.transaction(async (tx) => {
+    const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for("update");
+    if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Ordem de compra não encontrada" });
+    if (order.status === newStatus) return { status: newStatus, entriesApplied: 0, entriesReverted: 0 };
 
-  if (status === "aprovada" && approvedBy) {
-    updateData.approvedBy = approvedBy;
-    updateData.approvedAt = new Date();
-  }
+    const items = await tx
+      .select()
+      .from(purchaseOrderItems)
+      .where(eq(purchaseOrderItems.purchaseOrderId, id))
+      .orderBy(asc(purchaseOrderItems.id));
 
-  return await db.update(purchaseOrders).set(updateData).where(eq(purchaseOrders.id, id));
+    let entriesApplied = 0;
+    let entriesReverted = 0;
+
+    if (newStatus === "entregue") {
+      for (const item of items) {
+        if (item.stockMovementId) continue; // já tem entrada: nunca duplica
+
+        let productId = item.productId;
+        let product = productId
+          ? (await tx.select().from(products).where(eq(products.id, productId)).for("update"))[0]
+          : undefined;
+
+        if (!product) {
+          const name = normalizeName(item.productName ?? "");
+          if (!name) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Há um item sem produto nem nome. Corrija a ordem antes de marcar como entregue." });
+          }
+          // evita duplicar: usa o produto de mesmo nome, se já existir
+          product = (
+            await tx
+              .select()
+              .from(products)
+              .where(sql`lower(trim(${products.description})) = ${name.toLowerCase()}`)
+              .limit(1)
+              .for("update")
+          )[0];
+          if (!product) {
+            const [created] = await tx
+              .insert(products)
+              .values({
+                description: name,
+                classification: item.isSpecificUse ? "uso_especifico" : "estoque",
+                costCenterId: order.costCenterId,
+                currentQuantity: 0,
+              })
+              .$returningId();
+            product = (await tx.select().from(products).where(eq(products.id, created.id)).for("update"))[0];
+          }
+          productId = product.id;
+          await tx.update(purchaseOrderItems).set({ productId }).where(eq(purchaseOrderItems.id, item.id));
+        }
+
+        if (item.isSpecificUse) continue; // uso específico: fica cadastrado, mas não entra no estoque
+
+        const [movement] = await tx
+          .insert(stockMovements)
+          .values({
+            productId: product.id,
+            type: "entrada",
+            quantity: item.quantity,
+            costCenterId: order.costCenterId,
+            userId,
+            pricePerUnit: item.unitValue,
+            notes: `Entrada - Ordem de compra ${order.orderNumber}`,
+          })
+          .$returningId();
+        await tx
+          .update(products)
+          .set({ currentQuantity: product.currentQuantity + item.quantity })
+          .where(eq(products.id, product.id));
+        await tx.update(purchaseOrderItems).set({ stockMovementId: movement.id }).where(eq(purchaseOrderItems.id, item.id));
+        entriesApplied += 1;
+      }
+    } else if (order.status === "entregue") {
+      for (const item of items) {
+        if (!item.stockMovementId) continue;
+
+        const [movement] = await tx.select().from(stockMovements).where(eq(stockMovements.id, item.stockMovementId)).for("update");
+        if (movement) {
+          const [product] = await tx.select().from(products).where(eq(products.id, movement.productId)).for("update");
+          if (product) {
+            const newBalance = product.currentQuantity - movement.quantity;
+            if (newBalance < 0) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Não dá para voltar o status: parte de "${product.description}" já saiu do estoque (saldo atual ${product.currentQuantity}, a entrada desta ordem foi de ${movement.quantity}).`,
+              });
+            }
+            await tx.update(products).set({ currentQuantity: newBalance }).where(eq(products.id, product.id));
+          }
+          await tx.delete(stockMovements).where(eq(stockMovements.id, movement.id));
+          entriesReverted += 1;
+        }
+        await tx.update(purchaseOrderItems).set({ stockMovementId: null }).where(eq(purchaseOrderItems.id, item.id));
+      }
+    }
+
+    await tx
+      .update(purchaseOrders)
+      .set({ status: newStatus, stockAppliedAt: newStatus === "entregue" ? new Date() : null })
+      .where(eq(purchaseOrders.id, id));
+
+    return { status: newStatus, entriesApplied, entriesReverted };
+  });
 }
 
 // ============ PURCHASE ORDER ITEMS OPERATIONS ============
@@ -736,11 +840,13 @@ export async function createPurchaseOrderItem(data: {
   quantity: number;
   unitValue: string;
   totalValue: string;
+  isSpecificUse?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
   return await db.insert(purchaseOrderItems).values({
+    isSpecificUse: data.isSpecificUse ?? false,
     purchaseOrderId: data.purchaseOrderId,
     productId: data.productId,
     productName: data.productName || null,
@@ -764,6 +870,14 @@ export async function deletePurchaseOrder(id: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  const [order] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).limit(1);
+  if (order?.status === "entregue") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: 'Esta ordem já foi entregue e deu entrada no estoque. Volte o status para "Solicitado" (isso desfaz a entrada) antes de excluir.',
+    });
+  }
+
   // Delete order items first
   await db.delete(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, id));
   
@@ -782,7 +896,6 @@ export async function updatePurchaseOrder(
     totalValue?: string;
     freightValue?: string | number;
     observations?: string;
-    status?: "pendente" | "aprovada" | "finalizada" | "cancelada";
   }
 ) {
   const db = await getDb();

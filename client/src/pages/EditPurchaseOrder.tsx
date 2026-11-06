@@ -1,3 +1,5 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { can } from "@shared/roles";
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -25,6 +27,7 @@ import { ArrowLeft, Save, Loader } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function EditPurchaseOrder() {
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const params = useParams();
   const orderId = params?.id ? parseInt(params.id) : null;
@@ -79,7 +82,7 @@ export default function EditPurchaseOrder() {
         observations: order.observations || '',
         paymentMethod: order.paymentMethod || 'a_vista',
         installments: order.installments || 1,
-        status: order.status || 'pendente',
+        status: order.status || 'solicitado',
       });
       setIsLoading(false);
     }
@@ -160,12 +163,10 @@ export default function EditPurchaseOrder() {
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case 'pendente':
+      case 'solicitado':
         return 'Solicitado';
-      case 'aprovada':
-        return 'Aprovado';
-      case 'finalizada':
-        return 'Finalizado';
+      case 'entregue':
+        return 'Entregue';
       case 'cancelada':
         return 'Cancelado';
       default:
@@ -175,11 +176,9 @@ export default function EditPurchaseOrder() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pendente':
+      case 'solicitado':
         return 'bg-yellow-100 text-yellow-800';
-      case 'aprovada':
-        return 'bg-blue-100 text-blue-800';
-      case 'finalizada':
+      case 'entregue':
         return 'bg-green-100 text-green-800';
       case 'cancelada':
         return 'bg-red-100 text-red-800';
@@ -213,7 +212,8 @@ export default function EditPurchaseOrder() {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button
+            {can(user?.role, "deliverOrders") && (
+<Button
               variant="outline"
               onClick={() => {
                 setNewStatus(formData.status);
@@ -222,6 +222,7 @@ export default function EditPurchaseOrder() {
             >
               Alterar Status
             </Button>
+)}
             <Button
               onClick={handleSave}
               disabled={isSaving}
@@ -381,7 +382,8 @@ export default function EditPurchaseOrder() {
                     {getStatusLabel(formData.status)}
                   </span>
                 </div>
-                <Button
+                {can(user?.role, "deliverOrders") && (
+<Button
                   variant="outline"
                   className="w-full"
                   onClick={() => {
@@ -391,6 +393,7 @@ export default function EditPurchaseOrder() {
                 >
                   Alterar Status
                 </Button>
+)}
               </CardContent>
             </Card>
 
@@ -435,15 +438,17 @@ export default function EditPurchaseOrder() {
           <div className="space-y-4">
             <div>
               <Label htmlFor="newStatus">Novo Status</Label>
+              <p className="text-xs text-muted-foreground mt-1 mb-2">
+                Marcar como Entregue dá entrada dos itens no estoque. Voltar para Solicitado desfaz essa entrada (só é possível se os itens ainda estiverem no estoque).
+              </p>
               <Select value={newStatus} onValueChange={setNewStatus}>
                 <SelectTrigger id="newStatus" className="mt-1">
                   <SelectValue placeholder="Selecione um novo status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pendente">Solicitado</SelectItem>
-                  <SelectItem value="aprovada">Aprovado</SelectItem>
-                  <SelectItem value="finalizada">Finalizado</SelectItem>
-                  <SelectItem value="cancelada">Cancelado</SelectItem>
+                  <SelectItem value="solicitado">Solicitado</SelectItem>
+                  <SelectItem value="entregue">Entregue (dá entrada no estoque)</SelectItem>
+                  {can(user?.role, "manageOrders") && <SelectItem value="cancelada">Cancelado</SelectItem>}
                 </SelectContent>
               </Select>
             </div>

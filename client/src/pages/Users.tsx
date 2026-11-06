@@ -1,3 +1,4 @@
+import { ROLES, ROLE_LABEL, type Role } from "@shared/roles";
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -13,8 +14,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { KeyRound, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-type Role = "user" | "supervisor" | "admin";
-const ROLE_LABEL: Record<Role, string> = { admin: "Administrador", supervisor: "Supervisor", user: "Usuário" };
 
 export default function Users() {
   const { user: me } = useAuth();
@@ -68,7 +67,7 @@ export default function Users() {
         <CardHeader>
           <CardTitle>Acessos</CardTitle>
           <CardDescription>
-            Administrador: tudo. Supervisor: também pode excluir e cancelar registros. Usuário: usa o dia a dia, sem excluir.
+            Administrador: tudo. Comprador: solicitações, ordens de compra e fornecedores. Supervisor: abre solicitações de compra e requisições de saída. Supervisor de almoxarifado: entrega requisições e controla o estoque. Usuário: somente consulta.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -104,7 +103,7 @@ export default function Users() {
                       >
                         <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+                          {ROLES.map((r) => (
                             <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>
                           ))}
                         </SelectContent>
@@ -154,7 +153,7 @@ export default function Users() {
               <Select value={form.role} onValueChange={(role) => setForm({ ...form, role: role as Role })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+                  {ROLES.map((r) => (
                     <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>
                   ))}
                 </SelectContent>
