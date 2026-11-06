@@ -1,3 +1,4 @@
+import { ROLE_LABEL } from "@shared/roles";
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -214,7 +215,7 @@ export default function Settings() {
             <div>
               <Label className="text-muted-foreground">Seu Papel</Label>
               <p className="font-medium capitalize">
-                {user?.role === "admin" ? "Administrador" : "Supervisor"}
+                {ROLE_LABEL[(user?.role ?? "user") as keyof typeof ROLE_LABEL]}
               </p>
             </div>
             <div>

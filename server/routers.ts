@@ -11,6 +11,7 @@ import { sdk } from "./_core/sdk";
 import { getSearchInfo, searchSuppliers } from "./_core/places";
 import { formatCnpj, onlyDigits } from "@shared/cnpj";
 import { hashPassword, verifyPassword } from "./_core/password";
+import { ROLES, can, type Permission } from "@shared/roles";
 
 // ============ ADMIN PROCEDURE ============
 const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
@@ -20,13 +21,26 @@ const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
   return next({ ctx });
 });
 
-// Exclusões e cancelamentos: só administrador ou supervisor
+// Exclusões e cancelamentos gerais: qualquer perfil de função (menos "Usuário", que só consulta)
 const managerProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  if (ctx.user.role !== "admin" && ctx.user.role !== "supervisor") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Apenas administrador ou supervisor pode fazer isso" });
+  if (ctx.user.role === "user") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Seu perfil não tem permissão para excluir ou cancelar" });
   }
   return next({ ctx });
 });
+
+const permissionProcedure = (permission: Permission, message: string) =>
+  protectedProcedure.use(async ({ ctx, next }) => {
+    if (!can(ctx.user.role, permission)) throw new TRPCError({ code: "FORBIDDEN", message });
+    return next({ ctx });
+  });
+
+const manageOrdersProcedure = permissionProcedure("manageOrders", "Apenas o comprador ou o administrador pode fazer isso");
+const deliverOrdersProcedure = permissionProcedure("deliverOrders", "Apenas comprador, supervisor de almoxarifado ou administrador pode alterar o status da ordem");
+const createRequestsProcedure = permissionProcedure("createRequests", "Apenas supervisores (ou o administrador) podem abrir solicitações e requisições");
+const updateRequestStatusProcedure = permissionProcedure("updateRequestStatus", "Apenas o comprador ou o administrador pode alterar o status da solicitação");
+const handleStockProcedure = permissionProcedure("handleStock", "Apenas o supervisor de almoxarifado ou o administrador pode mexer no estoque");
+const manageExitRequestsProcedure = permissionProcedure("manageExitRequests", "Seu perfil não pode cancelar ou excluir requisições de saída");
 
 // Trava simples contra tentativas de adivinhar senha: 5 erros por e-mail em 15 min
 const failedLogins = new Map<string, { count: number; first: number }>();
@@ -158,7 +172,7 @@ export const appRouter = router({
           name: z.string().min(2),
           email: z.string().email(),
           password: z.string().min(8, "A senha precisa ter pelo menos 8 caracteres"),
-          role: z.enum(["user", "supervisor", "admin"]),
+          role: z.enum(ROLES),
         })
       )
       .mutation(async ({ input }) => {
@@ -176,7 +190,7 @@ export const appRouter = router({
         z.object({
           id: z.number(),
           name: z.string().min(2).optional(),
-          role: z.enum(["user", "supervisor", "admin"]).optional(),
+          role: z.enum(ROLES).optional(),
           isActive: z.boolean().optional(),
         })
       )
@@ -329,7 +343,7 @@ export const appRouter = router({
         return await db.getStockMovements(input);
       }),
 
-    create: protectedProcedure
+    create: handleStockProcedure
       .input(
         z.object({
           productId: z.number(),
@@ -342,12 +356,19 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
+        // Saída de estoque acontece pela Requisição de Saída; lançamento direto só o administrador (ajustes)
+        if (input.type === "saida" && ctx.user.role !== "admin") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "A saída de produtos é feita pela Requisição de Saída. Peça ao supervisor para abrir a requisição.",
+          });
+        }
         // Valida o saldo, grava a movimentação e atualiza o produto numa transação só
         const { newQuantity } = await db.applyStockMovement({ ...input, userId: ctx.user.id });
         return { success: true, newQuantity };
       }),
 
-    update: protectedProcedure
+    update: handleStockProcedure
       .input(
         z.object({
           id: z.number(),
@@ -366,7 +387,7 @@ export const appRouter = router({
         });
       }),
 
-    delete: managerProcedure
+    delete: handleStockProcedure
       .input(z.number())
       .mutation(async ({ input }) => {
         return await db.deleteStockMovementSafe(input);
@@ -379,7 +400,7 @@ export const appRouter = router({
       return await db.getSuppliers();
     }),
 
-    create: protectedProcedure.input(supplierCreateInput).mutation(async ({ input }) => {
+    create: manageOrdersProcedure.input(supplierCreateInput).mutation(async ({ input }) => {
       const digits = onlyDigits(input.cnpj);
       if (digits.length !== 14) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "O CNPJ precisa ter 14 números" });
@@ -399,7 +420,7 @@ export const appRouter = router({
       return await db.createSupplier({ ...fields, cnpj, companyName: input.companyName.trim() });
     }),
 
-    update: protectedProcedure
+    update: manageOrdersProcedure
       .input(z.object({ id: z.number(), companyName: z.string().trim().min(1).max(255).optional(), ...supplierFieldsShape }))
       .mutation(async ({ input }) => {
         const { id, companyName, ...rest } = input;
@@ -417,7 +438,7 @@ export const appRouter = router({
       }),
 
     // "Remover" tira do catálogo, mas preserva o histórico das ordens de compra
-    remove: managerProcedure.input(z.number()).mutation(async ({ input }) => {
+    remove: manageOrdersProcedure.input(z.number()).mutation(async ({ input }) => {
       await db.updateSupplier(input, { isActive: false, isFavorite: false });
       return { success: true } as const;
     }),
@@ -462,7 +483,7 @@ export const appRouter = router({
         return await db.getPurchaseOrders(input);
       }),
 
-    create: protectedProcedure
+    create: manageOrdersProcedure
       .input(
         z.object({
           orderNumber: z.string().min(1),
@@ -487,6 +508,7 @@ export const appRouter = router({
             quantity: z.number().min(1),
             unitValue: z.string(),
             totalValue: z.string(),
+            isSpecificUse: z.boolean().optional(),
             })
           ).optional().default([]),
         })
@@ -521,6 +543,7 @@ export const appRouter = router({
               quantity: item.quantity,
               unitValue: item.unitValue,
               totalValue: item.totalValue,
+              isSpecificUse: item.isSpecificUse ?? false,
             });
           }
         }
@@ -546,27 +569,30 @@ export const appRouter = router({
       return await db.getPurchaseOrderById(input);
     }),
 
-    updateStatus: adminProcedure
+    // Marcar como "entregue" dá entrada no estoque; sair de "entregue" desfaz a entrada.
+    updateStatus: deliverOrdersProcedure
       .input(
         z.object({
           id: z.number(),
-          status: z.enum(["pendente", "aprovada", "finalizada", "cancelada"]),
+          status: z.enum(["solicitado", "entregue", "cancelada"]),
         })
       )
       .mutation(async ({ input, ctx }) => {
-        const approvedBy = input.status === "aprovada" ? ctx.user.id : undefined;
-        return await db.updatePurchaseOrderStatus(input.id, input.status, approvedBy);
+        if (input.status === "cancelada" && !can(ctx.user.role, "manageOrders")) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Apenas o comprador ou o administrador pode cancelar uma ordem" });
+        }
+        return await db.changePurchaseOrderStatus(input.id, input.status, ctx.user.id);
       }),
 
     getItems: protectedProcedure.input(z.number()).query(async ({ input }) => {
       return await db.getPurchaseOrderItems(input);
     }),
 
-    delete: managerProcedure.input(z.number()).mutation(async ({ input }) => {
+    delete: manageOrdersProcedure.input(z.number()).mutation(async ({ input }) => {
       return await db.deletePurchaseOrder(input);
     }),
 
-    update: protectedProcedure
+    update: manageOrdersProcedure
       .input(
         z.object({
           id: z.number(),
@@ -577,7 +603,6 @@ export const appRouter = router({
           installments: z.number().optional(),
           totalValue: z.string().optional(),
           observations: z.string().optional(),
-          status: z.enum(["pendente", "aprovada", "finalizada", "cancelada"]).optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -839,7 +864,7 @@ export const appRouter = router({
         return await db.getPurchaseRequests(input);
       }),
 
-    create: protectedProcedure
+    create: createRequestsProcedure
       .input(
         z.object({
           sector: z.string().min(1),
@@ -888,7 +913,7 @@ export const appRouter = router({
       return await db.getPurchaseRequestWithDetails(input);
     }),
 
-    updateStatus: protectedProcedure
+    updateStatus: updateRequestStatusProcedure
       .input(
         z.object({
           id: z.number(),
@@ -1033,7 +1058,7 @@ export const appRouter = router({
         return db.getExitRequests(input || {});
       }),
 
-    create: protectedProcedure
+    create: createRequestsProcedure
       .input(
         z.object({
           sector: z.string().min(1),
@@ -1066,7 +1091,7 @@ export const appRouter = router({
         return db.getExitRequestById(input.id);
       }),
 
-    markItemDelivered: protectedProcedure
+    markItemDelivered: handleStockProcedure
       .input(
         z.object({
           itemId: z.number(),
@@ -1081,13 +1106,13 @@ export const appRouter = router({
         );
       }),
 
-    delete: managerProcedure
+    delete: manageExitRequestsProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return db.deleteExitRequest(input.id);
       }),
 
-    cancel: managerProcedure
+    cancel: manageExitRequestsProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ ctx, input }) => {
       return db.cancelExitRequest(input.id, ctx.user.id);

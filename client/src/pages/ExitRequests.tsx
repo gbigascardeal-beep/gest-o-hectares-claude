@@ -1,3 +1,5 @@
+import { useAuth } from "@/_core/hooks/useAuth";
+import { can } from "@shared/roles";
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -59,6 +61,8 @@ const statusColors: Record<StatusType, string> = {
 };
 
 export default function ExitRequests() {
+  const { user } = useAuth();
+  const canCreate = can(user?.role, "createRequests");
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
@@ -114,10 +118,12 @@ export default function ExitRequests() {
             Controle de retirada de materiais do almoxarifado
           </p>
         </div>
-        <Button onClick={() => navigate("/exit-requests/new")} className="bg-green-600 hover:bg-green-700">
+        {canCreate && (
+<Button onClick={() => navigate("/exit-requests/new")} className="bg-green-600 hover:bg-green-700">
           <Plus className="w-4 h-4 mr-2" />
           Nova Requisição
         </Button>
+)}
       </div>
 
       {/* Stats Cards */}

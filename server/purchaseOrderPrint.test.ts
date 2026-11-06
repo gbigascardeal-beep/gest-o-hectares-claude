@@ -22,7 +22,7 @@ describe("generatePurchaseOrderPrint", () => {
       installments: 1,
       observations: "Teste",
       createdAt: new Date("2026-01-20"),
-      status: "pendente",
+      status: "solicitado",
       items: [
         {
           productId: 1,

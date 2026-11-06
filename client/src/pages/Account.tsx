@@ -1,3 +1,4 @@
+import { ROLE_LABEL as SHARED_ROLE_LABEL } from "@shared/roles";
 import { useState } from "react";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
@@ -7,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 
-const ROLE_LABEL: Record<string, string> = { admin: "Administrador", supervisor: "Supervisor", user: "Usuário" };
+const ROLE_LABEL: Record<string, string> = SHARED_ROLE_LABEL;
 
 export default function Account() {
   const { user } = useAuth();
