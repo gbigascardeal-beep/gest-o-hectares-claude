@@ -37,7 +37,7 @@ Depois do primeiro acesso, cadastre pelo menos um centro de custo em **Configura
 - **Supervisor de almoxarifado**: entrega as requisições de saída (dá baixa no estoque) e controla o estoque.
 - **Usuário**: somente consulta.
 
-Fluxo: solicitação de compra → comprador cota fora do sistema e faz a **ordem de compra** (status *Solicitado*) → ao marcar **Entregue** (comprador, almoxarifado ou administrador), cada item entra no estoque, e produto ainda não cadastrado é criado. O número da ordem é gerado sozinho, em sequência por ano (OC-2026-001, OC-2026-002...). Durante o cadastro, uma barra mostra o total (produtos, frete, impostos, desconto) em tempo real. Itens marcados como **uso específico** não entram no saldo. Voltar para *Solicitado* desfaz a entrada (só se os itens ainda estiverem no estoque). A saída de estoque só acontece por **Requisição de Saída**.
+Fluxo: solicitação de compra → comprador cota fora do sistema e faz a **ordem de compra** (status *Solicitado*) → ao marcar **Entregue** (comprador, almoxarifado ou administrador), cada item entra no estoque, e produto ainda não cadastrado é criado. O número da ordem é gerado sozinho, em sequência por ano (OC-2026-001, OC-2026-002...). Durante o cadastro, uma barra mostra o total (produtos, frete, impostos, desconto) em tempo real. Na edição da ordem dá para trocar descrição, quantidade, valor e desconto dos produtos, adicionar e remover itens (só com a ordem em *Solicitado*; ordem entregue precisa voltar a *Solicitado* antes). Itens marcados como **uso específico** não entram no saldo. Voltar para *Solicitado* desfaz a entrada (só se os itens ainda estiverem no estoque). A saída de estoque só acontece por **Requisição de Saída**.
 
 
 ## Pendências conhecidas
