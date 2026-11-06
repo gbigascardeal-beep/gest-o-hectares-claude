@@ -10,6 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { sdk } from "./_core/sdk";
 import { getSearchInfo, searchSuppliers } from "./_core/places";
 import { formatCnpj, onlyDigits } from "@shared/cnpj";
+import { CnpjLookupError, lookupCnpjCached } from "./_core/cnpjLookup";
 import { hashPassword, verifyPassword } from "./_core/password";
 import { ROLES, can, type Permission } from "@shared/roles";
 
@@ -429,6 +430,25 @@ export const appRouter = router({
         await db.updateSupplier(id, { ...cleanSupplierFields(rest), ...(companyName ? { companyName } : {}) });
         return { success: true } as const;
       }),
+
+    // Preenche o cadastro a partir do CNPJ (dados públicos da Receita Federal)
+    lookupCnpj: manageOrdersProcedure.input(z.object({ cnpj: z.string().max(30) })).mutation(async ({ input, ctx }) => {
+      try {
+        const data = await lookupCnpjCached(input.cnpj, ctx.user.id);
+        const existing = (await db.getSupplierByCnpj(formatCnpj(data.cnpj))) ?? (await db.getSupplierByCnpj(data.cnpj));
+        return {
+          ...data,
+          alreadyRegistered: !!existing && existing.isActive,
+          existingSupplierId: existing && existing.isActive ? existing.id : null,
+        };
+      } catch (error) {
+        if (error instanceof CnpjLookupError) {
+          const code = error.code === "INVALID" ? "BAD_REQUEST" : error.code === "NOT_FOUND" ? "NOT_FOUND" : error.code === "RATE_LIMIT" ? "TOO_MANY_REQUESTS" : "SERVICE_UNAVAILABLE";
+          throw new TRPCError({ code: code as "BAD_REQUEST", message: error.message });
+        }
+        throw error;
+      }
+    }),
 
     setFavorite: protectedProcedure
       .input(z.object({ id: z.number(), isFavorite: z.boolean() }))

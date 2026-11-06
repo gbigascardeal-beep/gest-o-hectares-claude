@@ -7,10 +7,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Trash2, FileText, Package, Truck, Percent, CreditCard, ChevronRight, Check, ChevronsUpDown, ArrowLeft } from "lucide-react";
+import { Plus, Trash2, FileText, Package, Truck, Percent, CreditCard, ChevronRight, Check, ChevronsUpDown, ArrowLeft, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { formatCnpj, onlyDigits } from "@shared/cnpj";
+import { useCnpjLookup } from "@/hooks/useCnpjLookup";
 
 interface OrderItem {
   productId: string;
@@ -112,6 +114,18 @@ export default function NewPurchaseOrder() {
   const [newSupplierAddress, setNewSupplierAddress] = useState("");
   const [newSupplierCity, setNewSupplierCity] = useState("");
   const [newSupplierState, setNewSupplierState] = useState("");
+  const [newSupplierTradeName, setNewSupplierTradeName] = useState("");
+  const cnpjLookup = useCnpjLookup((d) => {
+    // só sobrescreve o que a Receita devolveu; o resto fica como a pessoa digitou
+    if (d.companyName) setNewSupplierName(d.companyName);
+    if (d.tradeName) setNewSupplierTradeName(d.tradeName);
+    if (d.cep) setNewSupplierCEP(d.cep);
+    if (d.address) setNewSupplierAddress(d.address);
+    if (d.city) setNewSupplierCity(d.city);
+    if (d.state) setNewSupplierState(d.state);
+    if (d.phone) setNewSupplierPhone(d.phone);
+    if (d.email) setNewSupplierEmail(d.email);
+  });
   const [loadingCEP, setLoadingCEP] = useState(false);
 
   const [formData, setFormData] = useState<FormData>({
@@ -172,9 +186,13 @@ export default function NewPurchaseOrder() {
     },
   });
 
+  const utils = trpc.useUtils();
   const createSupplierMutation = trpc.suppliers.create.useMutation({
-    onSuccess: () => {
+    onSuccess: async (created: any) => {
       toast.success("Fornecedor cadastrado com sucesso!");
+      await utils.suppliers.list.invalidate();
+      const createdId = Array.isArray(created) ? created[0]?.id : undefined;
+      if (createdId) setFormData((prev) => ({ ...prev, supplierId: String(createdId) }));
       setShowNewSupplierDialog(false);
       setNewSupplierName("");
       setNewSupplierCNPJ("");
@@ -184,6 +202,7 @@ export default function NewPurchaseOrder() {
       setNewSupplierAddress("");
       setNewSupplierCity("");
       setNewSupplierState("");
+      setNewSupplierTradeName("");
     },
     onError: (error: any) => {
       toast.error(error.message || "Erro ao cadastrar fornecedor");
@@ -317,7 +336,7 @@ export default function NewPurchaseOrder() {
   };
 
   const handleAddNewSupplier = async () => {
-    if (!newSupplierName || !newSupplierCNPJ || !newSupplierPhone || !newSupplierEmail || !newSupplierCEP || !newSupplierAddress) {
+    if (!newSupplierName || !newSupplierCNPJ || !newSupplierPhone || !newSupplierCEP || !newSupplierAddress) {
       toast.error("Preencha todos os campos obrigatórios do fornecedor");
       return;
     }
@@ -325,6 +344,7 @@ export default function NewPurchaseOrder() {
     createSupplierMutation.mutate({
       cnpj: newSupplierCNPJ,
       companyName: newSupplierName,
+      ...(newSupplierTradeName.trim() ? { tradeName: newSupplierTradeName.trim() } : {}),
       email: newSupplierEmail,
       phone: newSupplierPhone,
       address: newSupplierAddress,
@@ -1093,23 +1113,54 @@ export default function NewPurchaseOrder() {
             <DialogTitle>Cadastrar Novo Fornecedor</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Linha 1: CNPJ/CPF e Razão Social */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-semibold text-gray-700">CNPJ/CPF *</Label>
+            {/* Linha 1: CNPJ + consulta */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-gray-700">CNPJ *</Label>
+              <div className="flex gap-2">
                 <Input
                   placeholder="00.000.000/0000-00"
+                  inputMode="numeric"
                   value={newSupplierCNPJ}
-                  onChange={(e) => setNewSupplierCNPJ(e.target.value)}
-                  className="h-11 text-base"
+                  onChange={(e) => {
+                    const formatted = formatCnpj(e.target.value);
+                    setNewSupplierCNPJ(formatted);
+                    cnpjLookup.check(formatted);
+                  }}
+                  className="h-11 text-base flex-1"
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11"
+                  disabled={cnpjLookup.loading || onlyDigits(newSupplierCNPJ).length !== 14}
+                  onClick={() => cnpjLookup.lookup(newSupplierCNPJ)}
+                >
+                  {cnpjLookup.loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Search className="w-4 h-4 mr-2" />}
+                  Consultar
+                </Button>
               </div>
+              <p className="text-xs text-gray-500">
+                Digite o CNPJ: os dados públicos da empresa são preenchidos automaticamente. Confira antes de cadastrar.
+              </p>
+            </div>
+
+            {/* Linha 1b: Razão Social e Nome Fantasia */}
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-gray-700">Razão Social *</Label>
                 <Input
                   placeholder="Digite a razão social"
                   value={newSupplierName}
                   onChange={(e) => setNewSupplierName(e.target.value)}
+                  className="h-11 text-base"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-gray-700">Nome Fantasia (opcional)</Label>
+                <Input
+                  placeholder="Nome comercial da empresa"
+                  value={newSupplierTradeName}
+                  onChange={(e) => setNewSupplierTradeName(e.target.value)}
                   className="h-11 text-base"
                 />
               </div>
@@ -1184,7 +1235,7 @@ export default function NewPurchaseOrder() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-sm font-semibold text-gray-700">Email *</Label>
+                <Label className="text-sm font-semibold text-gray-700">E-mail (opcional)</Label>
                 <Input
                   placeholder="email@empresa.com"
                   type="email"
@@ -1205,7 +1256,7 @@ export default function NewPurchaseOrder() {
             </Button>
             <Button
               onClick={handleAddNewSupplier}
-              disabled={loadingCEP}
+              disabled={loadingCEP || cnpjLookup.loading}
               className="h-11 px-6 bg-blue-600 hover:bg-blue-700"
             >
               {loadingCEP ? "Buscando CEP..." : "Cadastrar"}

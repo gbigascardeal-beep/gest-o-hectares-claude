@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { formatCnpj, onlyDigits } from "@shared/cnpj";
+import { useCnpjLookup } from "@/hooks/useCnpjLookup";
 import type { Supplier } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -427,6 +428,19 @@ function SupplierFormDialog({ supplier, onClose }: { supplier: Supplier | null; 
   });
   const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
+  const cnpjLookup = useCnpjLookup((d) =>
+    setForm((f) => ({
+      ...f,
+      companyName: d.companyName || f.companyName,
+      tradeName: d.tradeName || f.tradeName,
+      cep: d.cep || f.cep,
+      address: d.address || f.address,
+      city: d.city || f.city,
+      state: d.state || f.state,
+      phone: d.phone || f.phone,
+      email: d.email || f.email,
+    }))
+  );
 
   const done = (message: string) => {
     toast.success(message);
@@ -461,8 +475,22 @@ function SupplierFormDialog({ supplier, onClose }: { supplier: Supplier | null; 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label>CNPJ {editing ? "" : "*"}</Label>
-            <Input value={form.cnpj} disabled={editing} inputMode="numeric" placeholder="00.000.000/0000-00"
-              onChange={(e) => setForm((f) => ({ ...f, cnpj: formatCnpj(e.target.value) }))} />
+            <div className="flex gap-2">
+              <Input value={form.cnpj} disabled={editing} inputMode="numeric" placeholder="00.000.000/0000-00"
+                onChange={(e) => {
+                  const formatted = formatCnpj(e.target.value);
+                  setForm((f) => ({ ...f, cnpj: formatted }));
+                  if (!editing) cnpjLookup.check(formatted);
+                }} />
+              {!editing && (
+                <Button type="button" variant="outline" disabled={cnpjLookup.loading || onlyDigits(form.cnpj).length !== 14}
+                  onClick={() => cnpjLookup.lookup(form.cnpj)}>
+                  {cnpjLookup.loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
+                  Consultar
+                </Button>
+              )}
+            </div>
+            {!editing && <p className="text-xs text-muted-foreground">Ao digitar o CNPJ, os dados públicos da empresa são preenchidos sozinhos.</p>}
           </div>
           <div className="space-y-2">
             <Label>Categoria</Label>

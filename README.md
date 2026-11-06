@@ -25,6 +25,7 @@ Depois do primeiro acesso, cadastre pelo menos um centro de custo em **Configura
 - **Meu catálogo** (fornecedores cadastrados, favoritos, categorias) funciona sem configuração extra.
 - **Encontrar fornecedores** funciona sem cadastro nenhum: usa o mapa gratuito do OpenStreetMap (alcance de até 100 km). A cobertura de empresas é menor que a do Google e telefone/site nem sempre aparecem.
 - Opcional: para uma busca mais completa e com "Todo o Brasil", crie uma chave da "Places API (New)" no Google Cloud e coloque em `GOOGLE_PLACES_API_KEY`. O Google cobra acima da cota gratuita mensal.
+- **Cadastro por CNPJ**: ao digitar o CNPJ no cadastro de fornecedor (catálogo ou nova ordem de compra), razão social, nome fantasia, endereço, CEP, cidade, UF, telefone e e-mail são preenchidos com os dados públicos da Receita (BrasilAPI, com ReceitaWS como reserva). Não precisa de chave nem configuração.
 
 ## Esqueceu a senha do administrador?
 `pnpm set-password email@empresa.com NovaSenha123`
