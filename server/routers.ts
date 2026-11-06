@@ -621,12 +621,33 @@ export const appRouter = router({
           installments: z.number().optional(),
           totalValue: z.string().optional(),
           observations: z.string().optional(),
+          // quando enviados, os produtos da ordem são substituídos e o total é recalculado no servidor
+          items: z
+            .array(
+              z.object({
+                productId: z.number().nullable().optional(),
+                description: z.string().max(500),
+                quantity: z.number(),
+                unitValue: z.number(),
+                discount: z.number().default(0),
+                isSpecificUse: z.boolean().default(false),
+              })
+            )
+            .optional(),
+          adjustment: z.number().optional(), // frete + impostos - descontos gerais (R$)
         })
       )
-      .mutation(async ({ input, ctx }) => {
-        const { id, ...data } = input;
-        return await db.updatePurchaseOrder(id, data);
+      .mutation(async ({ input }) => {
+        const { id, items, adjustment, totalValue, ...data } = input;
+        if (items) {
+          return await db.updatePurchaseOrderWithItems(id, data, items, adjustment ?? 0);
+        }
+        return await db.updatePurchaseOrder(id, { ...data, totalValue });
       }),
+
+    getItemsForEdit: protectedProcedure.input(z.number()).query(async ({ input }) => {
+      return await db.getPurchaseOrderItemsForEdit(input);
+    }),
   }),
 
   // ============ FILES ============

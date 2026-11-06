@@ -23,8 +23,23 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Save, Loader } from 'lucide-react';
+import { ArrowLeft, Save, Loader, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { calcOrderTotals, formatBRL, itemTotal } from '@shared/orderTotals';
+
+type EditItem = {
+  key: string;
+  productId: number | null;
+  originalDescription: string;
+  description: string;
+  quantity: string;
+  unitValue: string;
+  discount: string;
+  isSpecificUse: boolean;
+};
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+const normalize = (t: string) => t.trim().replace(/\s+/g, ' ').toLowerCase();
 
 export default function EditPurchaseOrder() {
   const { user } = useAuth();
@@ -37,12 +52,17 @@ export default function EditPurchaseOrder() {
   const [formData, setFormData] = useState<any>(null);
   const [showStatusDialog, setShowStatusDialog] = useState(false);
   const [newStatus, setNewStatus] = useState('');
+  const [items, setItems] = useState<EditItem[] | null>(null);
+  const [adjustment, setAdjustment] = useState('0');
 
   // Fetch order data
   const { data: order, isLoading: orderLoading } = trpc.purchaseOrders.getById.useQuery(
     orderId || 0,
     { enabled: !!orderId }
   );
+
+  const { data: savedItems } = trpc.purchaseOrders.getItemsForEdit.useQuery(orderId || 0, { enabled: !!orderId });
+  const { data: productList = [] } = trpc.products.list.useQuery({}) as any;
 
   // Fetch suppliers and cost centers
   const { data: suppliers = [] } = trpc.suppliers.list.useQuery() as any;
@@ -88,6 +108,30 @@ export default function EditPurchaseOrder() {
     }
   }, [order, formData]);
 
+  // Carrega os produtos da ordem uma única vez
+  useEffect(() => {
+    if (order && savedItems && !items) {
+      const savedSum = savedItems.reduce((sum: number, it: any) => sum + parseFloat(it.totalValue || '0'), 0);
+      setItems(
+        savedItems.map((it: any) => {
+          const gross = it.quantity * parseFloat(it.unitValue || '0');
+          return {
+            key: `saved-${it.id}`,
+            productId: it.productId ?? null,
+            originalDescription: it.description,
+            description: it.description,
+            quantity: String(it.quantity),
+            unitValue: String(parseFloat(it.unitValue || '0')),
+            discount: String(Math.max(0, round2(gross - parseFloat(it.totalValue || '0')))),
+            isSpecificUse: !!it.isSpecificUse,
+          };
+        })
+      );
+      // frete, impostos e descontos gerais que já estavam no total salvo
+      setAdjustment(String(round2(parseFloat(order.totalValue || '0') - savedSum)));
+    }
+  }, [order, savedItems, items]);
+
   if (!orderId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -122,10 +166,37 @@ export default function EditPurchaseOrder() {
     });
   };
 
+  // Produtos só podem ser editados enquanto a ordem está "Solicitado" (depois de entregue já deu entrada no estoque)
+  const canEditItems = formData.status === 'solicitado' && can(user?.role, 'manageOrders');
+  const totals = calcOrderTotals({ items: items ?? [] });
+  const adjustmentNumber = parseFloat(adjustment.replace(',', '.')) || 0;
+  const editedTotal = Math.max(0, round2(totals.subtotal + adjustmentNumber));
+  const displayTotal = canEditItems && items ? editedTotal : parseFloat(formData.totalValue || '0');
+
+  const updateItem = (key: string, patch: Partial<EditItem>) =>
+    setItems((prev) => (prev ? prev.map((it) => (it.key === key ? { ...it, ...patch } : it)) : prev));
+  const addItem = () =>
+    setItems((prev) => [
+      ...(prev ?? []),
+      { key: `new-${Date.now()}-${Math.random()}`, productId: null, originalDescription: '', description: '', quantity: '1', unitValue: '0', discount: '0', isSpecificUse: false },
+    ]);
+  const removeItem = (key: string) => setItems((prev) => (prev ? prev.filter((it) => it.key !== key) : prev));
+
   const handleSave = async () => {
     if (!formData.supplierId || !formData.costCenterId) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
+    }
+
+    if (canEditItems && items) {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const qty = parseFloat(it.quantity);
+        if (!it.description.trim()) return toast.error(`Produto ${i + 1}: informe a descrição`);
+        if (!Number.isInteger(qty) || qty < 1) return toast.error(`Produto ${i + 1}: a quantidade precisa ser um número inteiro maior que zero`);
+        if (!(parseFloat(it.unitValue) >= 0)) return toast.error(`Produto ${i + 1}: informe o valor unitário`);
+        if (itemTotal(it) < 0) return toast.error(`Produto ${i + 1}: o desconto é maior que o valor do produto`);
+      }
     }
 
     setIsSaving(true);
@@ -134,10 +205,28 @@ export default function EditPurchaseOrder() {
         id: orderId,
         supplierId: parseInt(formData.supplierId),
         costCenterId: parseInt(formData.costCenterId),
-        totalValue: formData.totalValue,
         observations: formData.observations,
         paymentMethod: formData.paymentMethod,
         installments: parseInt(formData.installments),
+        ...(canEditItems && items
+          ? {
+              items: items.map((it) => {
+                // mantém o vínculo com o produto cadastrado se a descrição não mudou;
+                // se mudou, usa o produto de mesmo nome (se existir) ou deixa para criar na entrega
+                const match = productList.find((p: any) => normalize(p.description || '') === normalize(it.description));
+                const productId = it.description === it.originalDescription ? it.productId : match?.id ?? null;
+                return {
+                  productId,
+                  description: it.description,
+                  quantity: parseFloat(it.quantity),
+                  unitValue: parseFloat(it.unitValue) || 0,
+                  discount: parseFloat(it.discount) || 0,
+                  isSpecificUse: it.isSpecificUse,
+                };
+              }),
+              adjustment: parseFloat(adjustment.replace(',', '.')) || 0,
+            }
+          : { totalValue: formData.totalValue }),
       });
     } catch (error) {
       setIsSaving(false);
@@ -335,18 +424,20 @@ export default function EditPurchaseOrder() {
                   </div>
                 )}
 
-                <div>
-                  <Label htmlFor="totalValue">Valor Total</Label>
-                  <Input
-                    id="totalValue"
-                    type="number"
-                    value={formData.totalValue}
-                    onChange={(e) => handleInputChange('totalValue', e.target.value)}
-                    step="0.01"
-                    placeholder="0.00"
-                    className="mt-1"
-                  />
-                </div>
+                {!canEditItems && (
+                  <div>
+                    <Label htmlFor="totalValue">Valor Total</Label>
+                    <Input
+                      id="totalValue"
+                      type="number"
+                      value={formData.totalValue}
+                      onChange={(e) => handleInputChange('totalValue', e.target.value)}
+                      step="0.01"
+                      placeholder="0.00"
+                      className="mt-1"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <Label htmlFor="observations">Observações</Label>
@@ -359,6 +450,116 @@ export default function EditPurchaseOrder() {
                     rows={4}
                   />
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Produtos da ordem */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-4">
+                  <CardTitle>Produtos</CardTitle>
+                  {canEditItems && (
+                    <Button type="button" variant="outline" size="sm" onClick={addItem} className="gap-1">
+                      <Plus className="w-4 h-4" /> Adicionar produto
+                    </Button>
+                  )}
+                </div>
+                {!canEditItems && (
+                  <p className="text-sm text-muted-foreground">
+                    {formData.status === 'entregue'
+                      ? 'Esta ordem já foi entregue e deu entrada no estoque. Para editar os produtos, volte o status para "Solicitado" (isso desfaz a entrada no estoque).'
+                      : formData.status === 'cancelada'
+                        ? 'Ordens canceladas não podem ter os produtos editados.'
+                        : 'Seu perfil não pode editar os produtos desta ordem.'}
+                  </p>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <datalist id="produtos-cadastrados">
+                  {productList.map((p: any) => (
+                    <option key={p.id} value={p.description} />
+                  ))}
+                </datalist>
+
+                {!items ? (
+                  <p className="text-sm text-gray-500">Carregando produtos...</p>
+                ) : items.length === 0 ? (
+                  <p className="text-sm text-gray-500">Nenhum produto nesta ordem.</p>
+                ) : (
+                  items.map((it, index) => (
+                    <div key={it.key} className="rounded-lg border border-gray-200 p-4 space-y-3">
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1">
+                          <Label>Descrição do produto *</Label>
+                          <Input
+                            list="produtos-cadastrados"
+                            value={it.description}
+                            disabled={!canEditItems}
+                            onChange={(e) => updateItem(it.key, { description: e.target.value })}
+                            placeholder="Digite ou escolha um produto cadastrado"
+                            className="mt-1"
+                          />
+                        </div>
+                        {canEditItems && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="mt-6 text-red-600 hover:bg-red-50"
+                            onClick={() => removeItem(it.key)}
+                            aria-label={`Remover produto ${index + 1}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div>
+                          <Label>Quantidade *</Label>
+                          <Input type="number" min="1" step="1" value={it.quantity} disabled={!canEditItems}
+                            onChange={(e) => updateItem(it.key, { quantity: e.target.value })} className="mt-1" />
+                        </div>
+                        <div>
+                          <Label>Valor unitário (R$) *</Label>
+                          <Input type="number" min="0" step="0.01" value={it.unitValue} disabled={!canEditItems}
+                            onChange={(e) => updateItem(it.key, { unitValue: e.target.value })} className="mt-1" />
+                        </div>
+                        <div>
+                          <Label>Desconto (R$)</Label>
+                          <Input type="number" min="0" step="0.01" value={it.discount} disabled={!canEditItems}
+                            onChange={(e) => updateItem(it.key, { discount: e.target.value })} className="mt-1" />
+                        </div>
+                        <div>
+                          <Label>Subtotal</Label>
+                          <p className="mt-1 h-9 flex items-center font-semibold text-gray-900">{formatBRL(itemTotal(it))}</p>
+                        </div>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" checked={it.isSpecificUse} disabled={!canEditItems}
+                          onChange={(e) => updateItem(it.key, { isSpecificUse: e.target.checked })} className="w-4 h-4" />
+                        Produto de uso específico (não entra no saldo do estoque)
+                      </label>
+                    </div>
+                  ))
+                )}
+
+                {canEditItems && items && (
+                  <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                    <div>
+                      <Label htmlFor="adjustment">Frete, impostos e descontos gerais (R$)</Label>
+                      <Input id="adjustment" type="number" step="0.01" value={adjustment}
+                        onChange={(e) => setAdjustment(e.target.value)} className="mt-1" />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Valor que já estava no total além dos produtos. Positivo soma, negativo desconta.
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-600">Produtos: <strong>{formatBRL(totals.subtotal)}</strong></p>
+                      <p className="text-sm text-gray-600">Total da ordem</p>
+                      <p className="text-2xl font-bold text-green-700">{formatBRL(editedTotal)}</p>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -413,7 +614,7 @@ export default function EditPurchaseOrder() {
                 <div>
                   <p className="text-sm text-gray-600">Valor Total</p>
                   <p className="font-semibold text-gray-900">
-                    R$ {parseFloat(formData.totalValue || '0').toFixed(2)}
+                    {formatBRL(displayTotal)}
                   </p>
                 </div>
                 <div className="pt-3 border-t border-gray-200">

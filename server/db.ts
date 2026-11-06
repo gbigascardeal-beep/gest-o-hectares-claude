@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { formatOrderNumber } from "@shared/orderTotals";
+import { calcOrderTotals, formatOrderNumber, itemTotal } from "@shared/orderTotals";
 import { eq, and, gte, lte, like, desc, asc, gt, sql, or, count, sum } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
@@ -885,6 +885,120 @@ export async function getPurchaseOrderItems(purchaseOrderId: number) {
     .select()
     .from(purchaseOrderItems)
     .where(eq(purchaseOrderItems.purchaseOrderId, purchaseOrderId));
+}
+
+/** Itens da ordem para a tela de edição: traz a descrição do produto cadastrado quando o item não tem nome próprio. */
+export async function getPurchaseOrderItemsForEdit(purchaseOrderId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({
+      id: purchaseOrderItems.id,
+      productId: purchaseOrderItems.productId,
+      productName: purchaseOrderItems.productName,
+      productDescription: products.description,
+      quantity: purchaseOrderItems.quantity,
+      unitValue: purchaseOrderItems.unitValue,
+      totalValue: purchaseOrderItems.totalValue,
+      isSpecificUse: purchaseOrderItems.isSpecificUse,
+    })
+    .from(purchaseOrderItems)
+    .leftJoin(products, eq(purchaseOrderItems.productId, products.id))
+    .where(eq(purchaseOrderItems.purchaseOrderId, purchaseOrderId))
+    .orderBy(asc(purchaseOrderItems.id));
+
+  return rows.map((row) => ({
+    id: row.id,
+    productId: row.productId,
+    description: (row.productName ?? "").trim() || row.productDescription || "",
+    quantity: row.quantity,
+    unitValue: row.unitValue,
+    totalValue: row.totalValue,
+    isSpecificUse: row.isSpecificUse,
+  }));
+}
+
+export type EditableOrderItem = {
+  productId?: number | null;
+  description: string;
+  quantity: number;
+  unitValue: number;
+  discount: number;
+  isSpecificUse: boolean;
+};
+
+/**
+ * Salva a ordem e substitui os produtos dela, tudo numa transação.
+ * Só vale para ordem "Solicitado": depois de entregue, os itens já deram entrada no estoque,
+ * então é preciso voltar o status (o que desfaz a entrada) antes de mexer nos produtos.
+ * O total é recalculado aqui: soma dos itens + ajuste (frete, impostos e descontos).
+ */
+export async function updatePurchaseOrderWithItems(
+  id: number,
+  header: {
+    supplierId?: number;
+    costCenterId?: number;
+    paymentMethod?: "a_vista" | "parcelado";
+    installments?: number;
+    observations?: string;
+  },
+  items: EditableOrderItem[],
+  adjustment: number
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const cleanItems = items.map((item, index) => {
+    const description = normalizeName(item.description ?? "");
+    if (!description) throw new TRPCError({ code: "BAD_REQUEST", message: `Produto ${index + 1}: informe a descrição` });
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `Produto ${index + 1}: a quantidade precisa ser um número inteiro maior que zero` });
+    }
+    if (!(item.unitValue >= 0) || !(item.discount >= 0)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `Produto ${index + 1}: valor e desconto não podem ser negativos` });
+    }
+    const total = itemTotal({ quantity: item.quantity, unitValue: item.unitValue, discount: item.discount });
+    if (total < 0) throw new TRPCError({ code: "BAD_REQUEST", message: `Produto ${index + 1}: o desconto é maior que o valor do produto` });
+    return { ...item, description, total };
+  });
+
+  const { subtotal } = calcOrderTotals({ items: cleanItems.map((i) => ({ quantity: i.quantity, unitValue: i.unitValue, discount: i.discount })) });
+  const totalValue = Math.max(0, Math.round((subtotal + (Number.isFinite(adjustment) ? adjustment : 0)) * 100) / 100);
+
+  return await db.transaction(async (tx) => {
+    const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).for("update");
+    if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Ordem de compra não encontrada" });
+    if (order.status !== "solicitado") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message:
+          order.status === "entregue"
+            ? 'Esta ordem já foi entregue e deu entrada no estoque. Volte o status para "Solicitado" (isso desfaz a entrada) para editar os produtos.'
+            : "Ordens canceladas não podem ter os produtos editados.",
+      });
+    }
+
+    await tx.delete(purchaseOrderItems).where(eq(purchaseOrderItems.purchaseOrderId, id));
+    for (const item of cleanItems) {
+      await tx.insert(purchaseOrderItems).values({
+        purchaseOrderId: id,
+        productId: item.productId ?? null,
+        productName: item.description,
+        quantity: item.quantity,
+        unitValue: item.unitValue.toFixed(2),
+        totalValue: item.total.toFixed(2),
+        isSpecificUse: item.isSpecificUse,
+      });
+    }
+
+    await tx
+      .update(purchaseOrders)
+      .set({ ...header, totalValue: totalValue.toFixed(2) })
+      .where(eq(purchaseOrders.id, id));
+
+    return { success: true as const, totalValue };
+  });
 }
 
 export async function deletePurchaseOrder(id: number) {
