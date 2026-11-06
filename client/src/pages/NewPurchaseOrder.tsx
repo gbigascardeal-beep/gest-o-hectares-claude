@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import { formatCnpj, onlyDigits } from "@shared/cnpj";
+import { calcOrderTotals, formatBRL, itemTotal } from "@shared/orderTotals";
 import { useCnpjLookup } from "@/hooks/useCnpjLookup";
 
 interface OrderItem {
@@ -25,7 +26,6 @@ interface OrderItem {
 }
 
 interface FormData {
-  orderNumber: string;
   supplierId: string;
   emissionDate: string;
   costCenterId: string;
@@ -129,7 +129,6 @@ export default function NewPurchaseOrder() {
   const [loadingCEP, setLoadingCEP] = useState(false);
 
   const [formData, setFormData] = useState<FormData>({
-    orderNumber: "",
     supplierId: "",
     emissionDate: new Date().toISOString().split("T")[0],
     costCenterId: "",
@@ -232,9 +231,20 @@ export default function NewPurchaseOrder() {
     toast.success("Produto removido");
   };
 
+  // Total da ordem, recalculado a cada alteração (é o mesmo valor que será gravado)
+  const totals = calcOrderTotals({
+    items: orderItems,
+    freightValue: transportData.freightValue,
+    addFreightToTotal: transportData.addFreightToTotal,
+    taxes: totalData.taxes,
+    applyTaxes: totalData.taxesApply,
+    discountValue: totalData.discountValue,
+    discountPercent: totalData.discountPercent,
+  });
+
   const handleNext = () => {
     if (currentStep === 0) {
-      if (!formData.orderNumber || !formData.supplierId || !formData.costCenterId) {
+      if (!formData.supplierId || !formData.costCenterId) {
         toast.error("Preencha os campos obrigatórios");
         return;
       }
@@ -253,24 +263,8 @@ export default function NewPurchaseOrder() {
 
   const handleSubmit = async () => {
     try {
-      // Envio simples e direto para testar
-      console.log("Tentando enviar ordem com dados:", {
-        orderNumber: formData.orderNumber,
-        supplierId: formData.supplierId,
-        costCenterId: formData.costCenterId,
-      });
-      
-      // Calcular valor total
-      const totalValue = orderItems.reduce((sum, item) => {
-        const quantity = parseFloat(item.quantity) || 0;
-        const unitValue = parseFloat(item.unitValue) || 0;
-        const discount = parseFloat(item.discount) || 0;
-        return sum + (quantity * unitValue - discount);
-      }, 0);
-
-      // Calcular frete se necessário
       const freightValue = parseFloat(transportData.freightValue) || 0;
-      const finalTotalValue = transportData.addFreightToTotal ? totalValue + freightValue : totalValue;
+      const finalTotalValue = totals.total;
 
       if (paymentData.type === "parcelado" && installments.length === 0) {
         toast.error("Por favor, gere as parcelas antes de cadastrar");
@@ -278,19 +272,17 @@ export default function NewPurchaseOrder() {
       }
 
       await createOrderMutation.mutateAsync({
-        orderNumber: formData.orderNumber,
         supplierId: parseInt(formData.supplierId || "0"),
         costCenterId: parseInt(formData.costCenterId || "0"),
         paymentMethod: paymentData.type,
         installments: paymentData.type === "parcelado" ? installments.length : 1,
         totalValue: finalTotalValue.toString(),
         freightValue: freightValue.toString(),
-        observations: "",
+        observations: observations.trim() || undefined,
         items: orderItems.map(item => {
           const quantity = parseFloat(item.quantity) || 0;
           const unitValue = parseFloat(item.unitValue) || 0;
-          const discount = parseFloat(item.discount) || 0;
-          const totalValue = (quantity * unitValue) - discount;
+          const totalValue = itemTotal(item);
           return {
             productId: item.productId ? parseInt(item.productId) : undefined,
             productName: item.productName || undefined,
@@ -434,11 +426,11 @@ export default function NewPurchaseOrder() {
 
               <div className="grid grid-cols-2 gap-8">
                 <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-gray-700">Número da Ordem *</Label>
+                  <Label className="text-sm font-semibold text-gray-700">Número da Ordem</Label>
                   <Input
-                    placeholder="Ex: OC-2026-001"
-                    value={formData.orderNumber}
-                    onChange={(e) => setFormData({ ...formData, orderNumber: e.target.value })}
+                    value="Gerado automaticamente ao cadastrar"
+                    readOnly
+                    disabled
                     className="h-11 text-base"
                   />
                 </div>
@@ -966,9 +958,14 @@ export default function NewPurchaseOrder() {
 
                     <Button
                       onClick={() => {
-                        const totalValue = orderItems.reduce((sum, item) => sum + (parseFloat(item.quantity || "0") * parseFloat(item.unitValue || "0") - parseFloat(item.discount || "0")), 0);
                         const installmentCount = parseInt(paymentData.installmentCount);
-                        const installmentValue = (totalValue as number) / installmentCount;
+                        if (!installmentCount || installmentCount < 1) {
+                          toast.error("Informe o número de parcelas");
+                          return;
+                        }
+                        // parcelas somam exatamente o total final (a última leva a diferença dos centavos)
+                        const installmentValue = Math.floor((totals.total * 100) / installmentCount) / 100;
+                        const lastInstallmentValue = Math.round((totals.total - installmentValue * (installmentCount - 1)) * 100) / 100;
                         const interval = parseInt(paymentData.installmentInterval);
                         const firstDate = new Date(paymentData.firstInstallmentDate);
                         const newInstallments: InstallmentData[] = [];
@@ -978,7 +975,7 @@ export default function NewPurchaseOrder() {
                           dueDate.setDate(dueDate.getDate() + (i * interval));
                           newInstallments.push({
                             dueDate: dueDate.toISOString().split('T')[0],
-                            value: parseFloat(installmentValue.toFixed(2)),
+                            value: i === installmentCount - 1 ? lastInstallmentValue : installmentValue,
                             paymentMethod: paymentData.paymentMethod,
                           });
                         }
@@ -1065,6 +1062,24 @@ export default function NewPurchaseOrder() {
             </div>
           )}
         </div>
+
+        {/* Total da ordem: visível durante todo o cadastro */}
+        {currentStep >= 1 && (
+          <div className="sticky bottom-0 z-30 mt-4 rounded-lg border border-gray-200 bg-white shadow-lg px-6 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-2">
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-600">
+                <span>Produtos: <strong className="text-gray-900">{formatBRL(totals.subtotal)}</strong></span>
+                <span>Frete: <strong className="text-gray-900">{formatBRL(totals.freight)}</strong></span>
+                <span>Impostos: <strong className="text-gray-900">{formatBRL(totals.taxes)}</strong></span>
+                <span>Desconto: <strong className="text-gray-900">- {formatBRL(totals.discount)}</strong></span>
+              </div>
+              <div className="text-right">
+                <span className="text-sm text-gray-600 mr-2">Total da ordem</span>
+                <span className="text-2xl font-bold text-green-700">{formatBRL(totals.total)}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Botões de Navegação */}
         <div className="mt-8 flex items-center justify-between gap-4">
