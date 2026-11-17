@@ -762,11 +762,13 @@ export const appRouter = router({
         z.object({
           classification: z.string().optional(),
           costCenterId: z.number().optional(),
+          search: z.string().optional(),
         }).optional()
       )
       .query(async ({ input }) => {
         const allProducts = await db.getProducts({
           costCenterId: input?.costCenterId,
+          search: input?.search,
         });
         // Filtrar apenas produtos de estoque (uso específico não entra em sugestões de compra)
         let filtered = allProducts.filter((p) => p.classification === "estoque");

@@ -12,8 +12,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Download, AlertTriangle, Package, TrendingDown, BarChart3, Mail, Calendar, Filter, Search } from "lucide-react";
+import { Download, AlertTriangle, Package, TrendingDown, BarChart3, Mail, Calendar, Filter, Search, FileText } from "lucide-react";
 import { toast } from "sonner";
+import { downloadPdf, type PdfReport } from "@/lib/pdfReport";
 
 // ============ HELPERS ============
 
@@ -111,6 +112,34 @@ function exportCSVBrazilian(data: any[], headers: { key: string; label: string }
   toast.success("Relatório exportado com sucesso!");
 }
 
+// PDF: mesmo comportamento do CSV, mas gera um arquivo PDF pronto para imprimir ou enviar
+function exportPDFReport<T>(report: PdfReport<T>, filename: string) {
+  if (!report.rows || report.rows.length === 0) {
+    toast.error("Nenhum dado para exportar");
+    return;
+  }
+  try {
+    downloadPdf(report, filename);
+    toast.success("PDF gerado com sucesso!");
+  } catch (error) {
+    console.error("Erro ao gerar PDF:", error);
+    toast.error("Não foi possível gerar o PDF");
+  }
+}
+
+const moneyCell = (value: any) => (value === null || value === undefined || value === "" || isNaN(Number(value)) ? "" : formatCurrencyBR(Number(value)));
+const textCell = (value: any) => (value === null || value === undefined ? "" : String(value));
+const classificationLabel = (value: string) => (value === "estoque" ? "Estoque" : "Uso Específico");
+const joinFilters = (items: (string | undefined | false)[]) => items.filter(Boolean).join(", ") || undefined;
+
+function PdfButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button variant="outline" size="sm" onClick={onClick}>
+      <FileText className="w-4 h-4 mr-1" /> PDF
+    </Button>
+  );
+}
+
 // ============ PERIOD FILTER COMPONENT ============
 function PeriodFilter({
   startDate,
@@ -199,6 +228,11 @@ export default function Reports() {
   const [sectorFilter, setSectorFilter] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
 
+  // Filtros da aba "Sugestões" (independentes dos da aba "Estoque Atual")
+  const [suggestedSearch, setSuggestedSearch] = useState("");
+  const [suggestedCostCenter, setSuggestedCostCenter] = useState("");
+  const [suggestedSituation, setSuggestedSituation] = useState("");
+
   // Data queries
   const { data: costCenters } = trpc.costCenters.list.useQuery();
   const { data: productsList } = trpc.products.list.useQuery({});
@@ -211,10 +245,18 @@ export default function Reports() {
 
   const { data: currentStock } = trpc.reports.currentStock.useQuery(currentStockInput);
 
-  const { data: suggestedPurchases } = trpc.reports.suggestedPurchases.useQuery({
-    classification: classificationFilter || undefined,
-    costCenterId: costCenterFilter ? Number(costCenterFilter) : undefined,
+  const { data: suggestedData } = trpc.reports.suggestedPurchases.useQuery({
+    costCenterId: suggestedCostCenter ? Number(suggestedCostCenter) : undefined,
+    search: suggestedSearch.trim() || undefined,
   });
+
+  // "Zerados" = estoque 0; "Abaixo do mínimo" = ainda tem saldo, mas está no mínimo ou abaixo
+  const suggestedPurchases = useMemo(() => {
+    const list = suggestedData || [];
+    if (suggestedSituation === "zerados") return list.filter((p: any) => p.currentQuantity === 0);
+    if (suggestedSituation === "abaixo") return list.filter((p: any) => p.currentQuantity > 0);
+    return list;
+  }, [suggestedData, suggestedSituation]);
 
   const movementsInput = useMemo(() => ({
     startDate: new Date(startDate),
@@ -309,6 +351,265 @@ export default function Reports() {
     aguardando_detalhes: "Aguardando Detalhes",
   };
 
+  // ============ PDF de cada relatório ============
+  const today = new Date().toISOString().split("T")[0];
+  const periodLabel = `Período: ${formatDateBR(startDate)} a ${formatDateBR(endDate)}`;
+  const costCenterName = (id: string) => (id ? costCenters?.find((c: any) => c.id === Number(id))?.name : undefined);
+  const productName = (id: string) => (id ? (productsList as any[] | undefined)?.find((p: any) => p.id === Number(id))?.description : undefined);
+
+  const pdfCurrentStock = () => {
+    const rows = currentStock || [];
+    exportPDFReport(
+      {
+        title: "Estoque Atual",
+        subtitle: "Quantidade e situação de todos os produtos em estoque",
+        filters: joinFilters([
+          searchFilter && `Busca: ${searchFilter}`,
+          costCenterFilter && `Centro de Custo: ${costCenterName(costCenterFilter)}`,
+          classificationFilter && `Classificação: ${classificationLabel(classificationFilter)}`,
+        ]),
+        summary: [
+          { label: "Total Produtos", value: String(rows.length) },
+          { label: "Total Itens", value: String(rows.reduce((acc, i) => acc + i.quantity, 0)) },
+          { label: "Abaixo Mínimo", value: String(rows.filter((i) => i.quantity <= i.minStock).length) },
+          { label: "Zerados", value: String(rows.filter((i) => i.quantity === 0).length) },
+        ],
+        columns: [
+          { label: "Descrição", get: (r: any) => textCell(r.description), weight: 4 },
+          { label: "Classificação", get: (r: any) => classificationLabel(r.classification), align: "center", weight: 1.6 },
+          { label: "Quantidade", get: (r: any) => textCell(r.quantity), align: "right" },
+          { label: "Mín.", get: (r: any) => textCell(r.minStock), align: "right" },
+          { label: "Máx.", get: (r: any) => textCell(r.maxStock), align: "right" },
+          { label: "Situação", get: (r: any) => (r.quantity === 0 ? "Zerado" : r.quantity <= r.minStock ? "Baixo" : "Normal"), align: "center" },
+          { label: "Local", get: (r: any) => textCell(r.localAlocacao), weight: 1.5 },
+        ],
+        rows,
+        rowFill: (r: any) => (r.quantity === 0 ? [1, 0.9, 0.9] : r.quantity <= r.minStock ? [1, 0.96, 0.85] : undefined),
+      },
+      `estoque-atual-${today}`
+    );
+  };
+
+  const pdfMovements = () => {
+    const rows = movements || [];
+    exportPDFReport(
+      {
+        title: "Movimentações por Período",
+        subtitle: "Entradas e saídas de produtos",
+        filters: joinFilters([
+          periodLabel,
+          productFilter && `Produto: ${productName(productFilter)}`,
+          typeFilter && `Tipo: ${typeFilter === "entrada" ? "Entrada" : "Saída"}`,
+          costCenterFilter && `Centro de Custo: ${costCenterName(costCenterFilter)}`,
+        ]),
+        summary: [
+          { label: "Movimentações", value: String(rows.length) },
+          { label: "Entradas", value: String(rows.filter((m: any) => m.type === "entrada").length) },
+          { label: "Saídas", value: String(rows.filter((m: any) => m.type !== "entrada").length) },
+        ],
+        columns: [
+          { label: "Data", get: (r: any) => formatDateBR(r.createdAt), weight: 1.3 },
+          { label: "Tipo", get: (r: any) => (r.type === "entrada" ? "Entrada" : "Saída"), weight: 1.1 },
+          { label: "Produto", get: (r: any) => textCell(r.productDescription), weight: 4 },
+          { label: "Quantidade", get: (r: any) => textCell(r.quantity), align: "right" },
+          { label: "Centro de Custo", get: (r: any) => textCell(r.costCenterName), weight: 2 },
+          { label: "Preço Unitário", get: (r: any) => moneyCell(r.pricePerUnit), align: "right", weight: 1.6 },
+          { label: "Lote", get: (r: any) => textCell(r.lote), weight: 1.2 },
+          { label: "Observações", get: (r: any) => textCell(r.notes), weight: 3 },
+        ],
+        rows,
+      },
+      `movimentacoes-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfConsumption = () => {
+    const rows = consumption || [];
+    exportPDFReport(
+      {
+        title: "Consumo por Produto",
+        subtitle: "Produtos mais consumidos (saídas) no período",
+        filters: joinFilters([periodLabel, productFilter && `Produto: ${productName(productFilter)}`, costCenterFilter && `Centro de Custo: ${costCenterName(costCenterFilter)}`]),
+        summary: [
+          { label: "Produtos", value: String(rows.length) },
+          { label: "Quantidade Total", value: String(rows.reduce((a: number, c: any) => a + Number(c.totalQuantity || 0), 0)) },
+          { label: "Valor Total", value: formatCurrencyBR(rows.reduce((a: number, c: any) => a + Number(c.totalValue || 0), 0)) },
+        ],
+        columns: [
+          { label: "Produto", get: (r: any) => textCell(r.productDescription), weight: 4 },
+          { label: "Quantidade Total", get: (r: any) => textCell(r.totalQuantity), align: "right", weight: 1.5 },
+          { label: "Nº Saídas", get: (r: any) => textCell(r.movementCount), align: "right" },
+          { label: "Valor Total", get: (r: any) => moneyCell(r.totalValue), align: "right", weight: 1.5 },
+        ],
+        rows,
+      },
+      `consumo-produto-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfSpending = () => {
+    const rows = spending || [];
+    exportPDFReport(
+      {
+        title: "Gastos por Centro de Custo",
+        subtitle: "Total de gastos agrupado por centro de custo",
+        filters: periodLabel,
+        summary: [
+          { label: "Centros de Custo", value: String(rows.length) },
+          { label: "Total de Gastos", value: formatCurrencyBR(rows.reduce((a: number, s: any) => a + Number(s.totalSpending || 0), 0)) },
+          { label: "Ordens", value: String(rows.reduce((a: number, s: any) => a + Number(s.orderCount || 0), 0)) },
+        ],
+        columns: [
+          { label: "Centro de Custo", get: (r: any) => textCell(r.costCenterName), weight: 4 },
+          { label: "Total de Gastos", get: (r: any) => moneyCell(r.totalSpending), align: "right", weight: 2 },
+          { label: "Qtd. Ordens", get: (r: any) => textCell(r.orderCount), align: "right" },
+          { label: "Valor Médio", get: (r: any) => moneyCell(r.averageOrderValue), align: "right", weight: 2 },
+        ],
+        rows,
+      },
+      `gastos-centro-custo-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfExitSector = () => {
+    const rows = exitBySector || [];
+    exportPDFReport(
+      {
+        title: "Requisições de Saída por Setor",
+        subtitle: "Quantidade de requisições e itens por setor",
+        filters: periodLabel,
+        summary: [
+          { label: "Setores", value: String(rows.length) },
+          { label: "Requisições", value: String(rows.reduce((a: number, s: any) => a + Number(s.totalRequests || 0), 0)) },
+          { label: "Itens Entregues", value: String(rows.reduce((a: number, s: any) => a + Number(s.totalItemsDelivered || 0), 0)) },
+        ],
+        columns: [
+          { label: "Setor", get: (r: any) => textCell(r.sector), weight: 4 },
+          { label: "Total Requisições", get: (r: any) => textCell(r.totalRequests), align: "right", weight: 1.5 },
+          { label: "Itens Solicitados", get: (r: any) => textCell(r.totalItemsRequested), align: "right", weight: 1.5 },
+          { label: "Itens Entregues", get: (r: any) => textCell(r.totalItemsDelivered), align: "right", weight: 1.5 },
+        ],
+        rows,
+      },
+      `saidas-por-setor-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfExitCollab = () => {
+    const rows = exitByCollab || [];
+    exportPDFReport(
+      {
+        title: "Requisições por Colaborador",
+        subtitle: "Quantidade de requisições por colaborador",
+        filters: joinFilters([periodLabel, sectorFilter && `Setor: ${sectorFilter}`]),
+        summary: [
+          { label: "Colaboradores", value: String(rows.length) },
+          { label: "Requisições", value: String(rows.reduce((a: number, c: any) => a + Number(c.totalRequests || 0), 0)) },
+        ],
+        columns: [
+          { label: "Colaborador", get: (r: any) => textCell(r.collaboratorName), weight: 3 },
+          { label: "Setor", get: (r: any) => textCell(r.sector), weight: 3 },
+          { label: "Total Requisições", get: (r: any) => textCell(r.totalRequests), align: "right", weight: 1.5 },
+          { label: "Itens Solicitados", get: (r: any) => textCell(r.totalItemsRequested), align: "right", weight: 1.5 },
+        ],
+        rows,
+      },
+      `requisicoes-colaborador-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfPriceHistory = () => {
+    const rows = priceHistory || [];
+    exportPDFReport(
+      {
+        title: "Histórico de Preços",
+        subtitle: "Evolução dos preços de compra por produto",
+        filters: joinFilters([periodLabel, productFilter && `Produto: ${productName(productFilter)}`]),
+        columns: [
+          { label: "Data", get: (r: any) => formatDateBR(r.createdAt), weight: 1.3 },
+          { label: "Produto", get: (r: any) => textCell(r.productDescription), weight: 4 },
+          { label: "Quantidade", get: (r: any) => textCell(r.quantity), align: "right" },
+          { label: "Preço Unitário", get: (r: any) => moneyCell(r.pricePerUnit), align: "right", weight: 1.6 },
+          { label: "Valor Total", get: (r: any) => moneyCell(r.totalValue), align: "right", weight: 1.6 },
+          { label: "Lote", get: (r: any) => textCell(r.lote), weight: 1.2 },
+          { label: "Observações", get: (r: any) => textCell(r.notes), weight: 3 },
+        ],
+        rows,
+      },
+      `historico-precos-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfNoMovement = () => {
+    const rows = productsWithoutMov || [];
+    exportPDFReport(
+      {
+        title: "Produtos Sem Movimentação",
+        subtitle: "Produtos que não tiveram nenhuma movimentação no período",
+        filters: joinFilters([periodLabel, classificationFilter && `Classificação: ${classificationLabel(classificationFilter)}`]),
+        summary: [{ label: "Produtos sem movimentação", value: String(rows.length) }],
+        columns: [
+          { label: "Descrição", get: (r: any) => textCell(r.description), weight: 4 },
+          { label: "Classificação", get: (r: any) => classificationLabel(r.classification), align: "center", weight: 1.6 },
+          { label: "Quantidade Atual", get: (r: any) => textCell(r.currentQuantity), align: "right", weight: 1.5 },
+          { label: "Local", get: (r: any) => textCell(r.localAlocacao), weight: 2 },
+        ],
+        rows,
+      },
+      `produtos-sem-movimentacao-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfPurchaseStatus = () => {
+    const rows = purchaseByStatus || [];
+    exportPDFReport(
+      {
+        title: "Solicitações de Compra por Status",
+        subtitle: "Distribuição das solicitações de compra por status",
+        filters: joinFilters([periodLabel, sectorFilter && `Setor: ${sectorFilter}`]),
+        summary: [{ label: "Total de solicitações", value: String(rows.reduce((a: number, p: any) => a + Number(p.total || 0), 0)) }],
+        columns: [
+          { label: "Status", get: (r: any) => statusLabels[r.status] || textCell(r.status), weight: 4 },
+          { label: "Quantidade", get: (r: any) => textCell(r.total), align: "right" },
+        ],
+        rows,
+      },
+      `solicitacoes-por-status-${startDate}-a-${endDate}`
+    );
+  };
+
+  const pdfSuggested = () => {
+    const rows = suggestedPurchases;
+    exportPDFReport(
+      {
+        title: "Sugestões de Compra",
+        subtitle: "Produtos abaixo do estoque mínimo que precisam ser repostos",
+        filters: joinFilters([
+          suggestedSearch.trim() && `Busca: ${suggestedSearch.trim()}`,
+          suggestedCostCenter && `Centro de Custo: ${costCenterName(suggestedCostCenter)}`,
+          suggestedSituation === "zerados" && "Situação: Zerados",
+          suggestedSituation === "abaixo" && "Situação: Abaixo do mínimo",
+        ]),
+        summary: [
+          { label: "Produtos em Falta", value: String(rows.length) },
+          { label: "Total a Comprar", value: `${rows.reduce((a: number, p: any) => a + p.suggestedQuantity, 0)} un` },
+          { label: "Urgentes (Zerados)", value: String(rows.filter((p: any) => p.currentQuantity === 0).length) },
+        ],
+        columns: [
+          { label: "Descrição", get: (r: any) => textCell(r.description), weight: 4 },
+          { label: "Classificação", get: (r: any) => classificationLabel(r.classification), align: "center", weight: 1.6 },
+          { label: "Atual", get: (r: any) => textCell(r.currentQuantity), align: "right" },
+          { label: "Mínimo", get: (r: any) => textCell(r.minStock), align: "right" },
+          { label: "Máximo", get: (r: any) => textCell(r.maxStock), align: "right" },
+          { label: "Comprar", get: (r: any) => textCell(r.suggestedQuantity), align: "right" },
+        ],
+        rows,
+        rowFill: (r: any) => (r.currentQuantity === 0 ? [1, 0.9, 0.9] : [1, 0.97, 0.85]),
+      },
+      `sugestoes-compra-${today}`
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -379,6 +680,7 @@ export default function Reports() {
                   >
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfCurrentStock} />
                 </div>
               </div>
             </CardHeader>
@@ -547,6 +849,7 @@ export default function Reports() {
                   >
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfMovements} />
                 </div>
               </div>
             </CardHeader>
@@ -692,6 +995,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfConsumption} />
                 </div>
               </div>
             </CardHeader>
@@ -775,6 +1079,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfSpending} />
                 </div>
               </div>
             </CardHeader>
@@ -858,6 +1163,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfExitSector} />
                 </div>
               </div>
             </CardHeader>
@@ -947,6 +1253,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfExitCollab} />
                 </div>
               </div>
             </CardHeader>
@@ -1044,6 +1351,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfPriceHistory} />
                 </div>
               </div>
             </CardHeader>
@@ -1148,6 +1456,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfNoMovement} />
                 </div>
               </div>
             </CardHeader>
@@ -1246,6 +1555,7 @@ export default function Reports() {
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfPurchaseStatus} />
                 </div>
               </div>
             </CardHeader>
@@ -1358,15 +1668,70 @@ export default function Reports() {
                         { key: "suggestedQuantity", label: "Quantidade Sugerida" },
                         { key: "classification", label: "Classificação" },
                       ],
-                      `sugestoes-compra-${new Date().toISOString().split("T")[0]}`
+                      `sugestoes-compra-${new Date().toISOString().split("T")[0]}`,
+                      joinFilters([
+                        suggestedSearch.trim() && `Busca: ${suggestedSearch.trim()}`,
+                        suggestedCostCenter && `Centro de Custo: ${costCenters?.find((c: any) => c.id === Number(suggestedCostCenter))?.name}`,
+                        suggestedSituation === "zerados" && "Situação: Zerados",
+                        suggestedSituation === "abaixo" && "Situação: Abaixo do mínimo",
+                      ])
                     )
                   }>
                     <Download className="w-4 h-4 mr-1" /> CSV
                   </Button>
+                  <PdfButton onClick={pdfSuggested} />
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Filters */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-muted/30 rounded-lg">
+                <div>
+                  <Label className="text-xs">Buscar</Label>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar produto..."
+                      value={suggestedSearch}
+                      onChange={(e) => setSuggestedSearch(e.target.value)}
+                      className="pl-8 h-9"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Centro de Custo</Label>
+                  <Select value={suggestedCostCenter || "all"} onValueChange={(v) => setSuggestedCostCenter(v === "all" ? "" : v)}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      {(costCenters || []).map((cc: any) => (
+                        <SelectItem key={cc.id} value={String(cc.id)}>{cc.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Situação</Label>
+                  <Select value={suggestedSituation || "all"} onValueChange={(v) => setSuggestedSituation(v === "all" ? "" : v)}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Todas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas</SelectItem>
+                      <SelectItem value="zerados">Zerados (urgentes)</SelectItem>
+                      <SelectItem value="abaixo">Abaixo do mínimo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-end">
+                  <Button variant="ghost" size="sm" onClick={() => { setSuggestedSearch(""); setSuggestedCostCenter(""); setSuggestedSituation(""); }}>
+                    <Filter className="w-4 h-4 mr-1" /> Limpar
+                  </Button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <SummaryCard title="Produtos em Falta" value={(suggestedPurchases || []).length} icon={AlertTriangle} color="red" />
                 <SummaryCard
