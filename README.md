@@ -27,6 +27,9 @@ Depois do primeiro acesso, cadastre pelo menos um centro de custo em **Configura
 - Opcional: para uma busca mais completa e com "Todo o Brasil", crie uma chave da "Places API (New)" no Google Cloud e coloque em `GOOGLE_PLACES_API_KEY`. O Google cobra acima da cota gratuita mensal.
 - **Cadastro por CNPJ**: ao digitar o CNPJ no cadastro de fornecedor (catálogo ou nova ordem de compra), razão social, nome fantasia, endereço, CEP, cidade, UF, telefone e e-mail são preenchidos com os dados públicos da Receita (BrasilAPI, com ReceitaWS como reserva). Não precisa de chave nem configuração.
 
+## Relatórios
+Cada relatório tem os botões **CSV** (planilha) e **PDF** (arquivo para imprimir ou enviar). O PDF é gerado no próprio navegador, com letra grande, e respeita os filtros da tela. A aba **Sugestões** tem filtros próprios (busca, centro de custo e situação).
+
 ## Esqueceu a senha do administrador?
 `pnpm set-password email@empresa.com NovaSenha123`
 
